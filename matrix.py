@@ -137,6 +137,9 @@ def http_cb(data, command, rc, stdout, stderr):
             if js:
                 # TODO errorcode: M_FORBIDDEN
                 dbg(js)
+        elif '/send/' in command:
+            if js:
+                dbg(js)
         else:
             w.prnt('', 'Uknown command in http cb')
             dbg(command)
@@ -234,7 +237,7 @@ class MatrixServer(object):
         self.polling = True
         data = urllib.urlencode({
             'access_token': self.access_token,
-            'timeout': 5,
+            'timeout': 5000,
             'from': self.end
         })
         http('/events?%s'%(data), None, 'http_cb')
