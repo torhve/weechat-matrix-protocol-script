@@ -102,10 +102,6 @@ def poll_cb(data, command, rc, stdout, stderr):
         w.prnt('', '{}: {}'.format(SCRIPT_NAME, stderr))
         return w.WEECHAT_RC_OK
 
-    if rc == w.WEECHAT_HOOK_PROCESS_ERROR:
-        w.prnt("", "%s: Error with command '%s'" % (SCRIPT_NAME, command))
-        return w.WEECHAT_RC_OK
-
     if stdout != '':
         if not command in STDOUT:
             STDOUT[command] = []
