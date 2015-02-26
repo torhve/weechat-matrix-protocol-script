@@ -13,6 +13,7 @@ import time
 import json
 import urllib
 import urlparse
+from pprint import pformat
 #import HTMLParser
 import sys
 
@@ -30,10 +31,11 @@ SCRIPT_COMMAND = SCRIPT_NAME
 
 CONF = {}
 SERVER = None
+STDOUT = {}
 default_color = w.color('default')
 
 def dbg(message, fout=True, main_buffer=True):
-    message = "DEBUG: {}".format(message)
+    message = "DEBUG: {}".format(pformat(message))
     #message = message.encode('utf-8', 'replace')
     if fout:
         file('/tmp/debug.log', 'a+').writelines(message + '\n')
@@ -95,7 +97,39 @@ def http(url, post, cb, timeout=30*1000):
     url = homeserver_url + url
     HOOK_URL = w.hook_process_hashtable('url:'+ url, post, timeout, cb, '')
 
-STDOUT = {}
+def poll_cb(data, command, rc, stdout, stderr):
+    if stderr != '':
+        w.prnt('', '{}: {}'.format(SCRIPT_NAME, stderr))
+        return w.WEECHAT_RC_OK
+
+    if rc == w.WEECHAT_HOOK_PROCESS_ERROR:
+        w.prnt("", "%s: Error with command '%s'" % (SCRIPT_NAME, command))
+        return w.WEECHAT_RC_OK
+
+    if stdout != '':
+        if not command in STDOUT:
+            STDOUT[command] = []
+        STDOUT[command].append(stdout)
+
+    if int(rc) >= 0:
+        stdout = "".join(STDOUT[command])
+        del STDOUT[command]
+        js = json.loads(stdout)
+        if 'errcode' in js:
+            w.prnt('', '{}: {}'.format(SCRIPT_NAME, js['errcode']))
+        else:
+            SERVER.end = js['end']
+            for chunk in js.get('chunk', []):
+                if 'room_id' in chunk:
+                    room = SERVER.rooms[chunk['room_id']]
+                    if room:
+                        room.parseChunk(chunk)
+    if int(rc) == -2 or int(rc) >= 0:
+        SERVER.polling = False
+        SERVER.poll()
+    return w.WEECHAT_RC_OK
+
+
 def http_cb(data, command, rc, stdout, stderr):
     if stderr != '':
         w.prnt('', '{}: {}'.format(SCRIPT_NAME, stderr))
@@ -110,6 +144,9 @@ def http_cb(data, command, rc, stdout, stderr):
         stdout = "".join(STDOUT[command])
         del STDOUT[command]
         js = json.loads(stdout)
+        if 'errcode' in js:
+            w.prnt('', '{}: {}'.format(SCRIPT_NAME, js['errcode']))
+            return w.WEECHAT_RC_OK
         # Get correct handler
         if 'login' in command:
             for k, v in js.items():
@@ -122,21 +159,13 @@ def http_cb(data, command, rc, stdout, stderr):
                 myroom = SERVER.addRoom(room)
                 for chunk in room['messages']['chunk']:
                     myroom.parseChunk(chunk)
+            SERVER.poll()
         elif 'messages' in command:
             for chunk in reversed(js.get('chunk', [])):
                 room = SERVER.rooms[chunk['room_id']]
                 if room:
                     room.parseChunk(chunk)
             SERVER.poll()
-        elif 'events' in command:
-            SERVER.end = js['end']
-            SERVER.polling = False
-            for chunk in js.get('chunk', []):
-                ### XXX parse presence
-                if 'room_id' in chunk:
-                    room = SERVER.rooms[chunk['room_id']]
-                    if room:
-                        room.parseChunk(chunk)
         elif 'leave' in command:
             if js:
                 dbg(js)
@@ -157,16 +186,15 @@ class MatrixServer(object):
 
     def __init__(self):
         self.nick = None
-        self.buffer = None
-        self.token = None
         self.connecting = False
         self.polling = False
         self.connected = False
-        self.message_buffer = {}
         self.rooms = {}
         self.end = 'END'
         self.connect()
-        self.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
+        # Timer used in cased of errors to restart the polling cycle
+        # During normal operation the polling should re-invok itself
+        self.polltimer = w.hook_timer(30*1000, 0, 0, "poll", "")
 
     def _getPost(self, post):
         extra = {
@@ -246,8 +274,7 @@ class MatrixServer(object):
             'timeout': 1000*30,
             'from': self.end
         })
-        http('/events?%s'%(data), {}, 'http_cb')
-
+        http('/events?%s' % (data), {}, 'poll_cb')
 
     def addRoom(self, room):
         myroom = Room(room)
@@ -406,7 +433,7 @@ class Room(object):
                 dbg(content)
             data = "{}{}\t{}{}".format(nick_c, nick, color, body)
             w.prnt_date_tags(self.channel_buffer, time_int, tags,
-                data.encode('UTF-8'))
+                data)
         elif chunk['type'] == 'm.room.topic':
             title = chunk['content']['topic']
             w.buffer_set(self.channel_buffer, "title", title)
@@ -421,7 +448,7 @@ class Room(object):
                     default_color
                   )
             w.prnt_date_tags(self.channel_buffer, int(time.time()), "",
-                data.encode('UTF-8'))
+                data)
         elif chunk['type'] == 'm.room.name':
             name = chunk['content']['name']
             w.buffer_set(self.channel_buffer, "short_name", name)
@@ -443,7 +470,7 @@ class Room(object):
                     wcolor('irc.color.message_join'),
                 )
                 w.prnt_date_tags(self.channel_buffer, time_int, "irc_join",
-                    data.encode('UTF-8'))
+                    data)
             if chunk['content']['membership'] == 'leave':
                 ### TODO delnick logic
                 nick = chunk['prev_content'].get('displayname', chunk['user_id'])
@@ -460,7 +487,7 @@ class Room(object):
                     wcolor('irc.color.message_quit'),
                 )
                 w.prnt_date_tags(self.channel_buffer, time_int, "irc_quit",
-                    data.encode('UTF-8'))
+                    data)
         elif chunk['type'] == 'm.typing':
             ''' TODO: Typing notices. '''
         else:
