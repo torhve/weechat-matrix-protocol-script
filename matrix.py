@@ -45,6 +45,9 @@ def unload():
     w.unhook(SERVER.polltimer)
     return w.WEECHAT_RC_OK
 
+def wcolor(optionname):
+    return w.color(w.config_string(w.config_get(optionname)))
+
 def command_help(current_buffer, args):
     help_cmds = { k[8:]: v.__doc__ for k, v in globals().items() if k.startswith("command_") }
 
@@ -125,7 +128,12 @@ def http_cb(data, command, rc, stdout, stderr):
                     if room:
                         room.parseChunk(chunk)
         elif 'leave' in command:
-            dbg(js)
+            if js:
+                dbg(js)
+        elif '/state/' in command:
+            if js:
+                # TODO errorcode: M_FORBIDDEN
+                dbg(js)
         else:
             w.prnt('', 'Uknown command in http cb')
             dbg(command)
@@ -249,6 +257,18 @@ class MatrixServer(object):
     def emote(self, room_id, body):
         self.msg(room_id, body, msgtype='m.emote')
 
+    def state(self, room_id, key, data):
+        http('/rooms/%s/state/%s?access_token=%s'
+            %(urllib.quote(room_id),
+              urllib.quote(key),
+              urllib.quote(self.access_token)),
+            {'customrequest': 'PUT',
+             'accept_encoding': 'application/json',
+             'transfer': 'application/json',
+             'postfields': json.dumps(data),
+            }, 'http_cb')
+
+
 def buffer_input_cb(b, buffer, data):
     for r_id, room in SERVER.rooms.items():
         if buffer == room.channel_buffer:
@@ -286,6 +306,9 @@ class Room(object):
 
     def __repr__(self):
         return self.name
+
+    def topic(self, topic):
+        SERVER.state(self.identifier, 'm.room.topic', {'topic':topic})
 
     def create_buffer(self):
         channel_buffer = w.buffer_search("", "{}.{}"
@@ -351,9 +374,7 @@ class Room(object):
                     + '_matrix/media/v1/download/')
                 body = content['body'] + ' ' + url
             elif content['msgtype'] == 'm.notice':
-                color = w.color(
-                        w.config_string(
-                        w.config_get('irc.color.notice')))
+                color = wcolor('irc.color.notice')
                 body = content['body']
 
             elif content['msgtype'] == 'm.emote':
@@ -370,6 +391,23 @@ class Room(object):
                 dbg(content)
             data = "{}{}\t{}{}".format(nick_c, nick, color, body)
             w.prnt_date_tags(self.channel_buffer, time_int, tags, data)
+        elif chunk['type'] == 'm.room.topic':
+            title = chunk['content']['topic']
+            w.buffer_set(self.channel_buffer, "title", title)
+            color = wcolor("irc.color.topic_new")
+            nick = self.users[SERVER.user_id]
+            data = '--\t{}{}{} has changed the topic to "{}{}{}"'.format(
+                    w.info_get('irc_nick_color', nick),
+                    nick,
+                    default_color,
+                    color,
+                    title,
+                    default_color
+                  )
+            w.prnt_date_tags(self.channel_buffer, int(time.time()), "", data)
+        elif chunk['type'] == 'm.room.name':
+            name = chunk['content']['name']
+            w.buffer_set(self.channel_buffer, "short_name", name)
         elif chunk['type'] == 'm.room.member':
             # TODO presence, leave, invite
             if chunk['content']['membership'] == 'join':
@@ -378,6 +416,8 @@ class Room(object):
                 self.users[chunk['user_id']] = nick
                 w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
                     nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
+        elif chunk['type'] == 'm.typing':
+            ''' TODO: Typing notices. '''
         else:
             dbg(chunk)
 
@@ -410,6 +450,16 @@ def emote_command_cb(data, current_buffer, args):
         return w.WEECHAT_RC_OK_EAT
     else:
         return w.WEECHAT_RC_OK
+
+def topic_command_cb(data, current_buffer, args):
+    room = SERVER.findRoom(current_buffer)
+    if room:
+        msg = " ".join(args.split()[1:])
+        room.topic(msg)
+        return w.WEECHAT_RC_OK_EAT
+    else:
+        return w.WEECHAT_RC_OK
+
 
 def closed_matrix_buffer_cb(data, buffer):
     global mbuffer
@@ -449,6 +499,7 @@ if __name__ == "__main__" and \
     w.hook_command_run('/part', 'part_command_cb', '')
     w.hook_command_run('/leave', 'part_command_cb', '')
     w.hook_command_run('/me', 'emote_command_cb', '')
+    w.hook_command_run('/topic', 'topic_command_cb', '')
     # Such elegance, much woe.
     cmds = {k[8:]: v for k, v in globals().items() if k.startswith("command_")}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
