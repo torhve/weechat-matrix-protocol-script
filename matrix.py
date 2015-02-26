@@ -64,7 +64,7 @@ def command_connect(current_buffer, args):
     if not SERVER.connected:
         SERVER.connect()
 
-def marix_command_cb(data, current_buffer, args):
+def matrix_command_cb(data, current_buffer, args):
     a = args.split(' ', 1)
     if len(a) > 1:
         function_name, args = a[0], " ".join(a[1:])
@@ -325,6 +325,7 @@ class Room(object):
         if chunk['type'] == 'm.room.message':
             tags = "notify_message"
             time_int = int(time.time()-chunk['age']/1000)
+            color = default_color
             nick = ''
             if chunk['user_id'] in self.users:
                 nick = self.users[chunk['user_id']]
@@ -347,10 +348,14 @@ class Room(object):
                     w.config_get_plugin('homeserver_url') \
                     + '_matrix/media/v1/download/')
                 body = content['body'] + ' ' + url
+            elif content['msgtype'] == 'm.notice':
+                color = w.color(w.config_string('irc.color.notice'))
+                body = content['body']
             else:
+                body = content['body']
                 w.prnt('', 'Uknown content type')
                 dbg(content)
-            data = "{}{}{}\t{}".format(nick_c, nick, default_color, body)
+            data = "{}{}\t{}{}".format(nick_c, nick, color, body)
             w.prnt_date_tags(self.channel_buffer, time_int, tags, data)
         elif chunk['type'] == 'm.room.member':
             # TODO presence, leave, invite
