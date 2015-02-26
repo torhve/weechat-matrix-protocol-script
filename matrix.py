@@ -234,18 +234,20 @@ class MatrixServer(object):
         self.rooms[room['room_id']] = myroom
         return myroom
 
-    def msg(self, room_id, body):
+    def msg(self, room_id, body, msgtype='m.text'):
         data = {
             'accept_encoding': 'application/json',
             'transfer': 'application/json',
             'postfields': json.dumps({
-                'msgtype': 'm.text',
+                'msgtype': msgtype,
                 'body': body,
         })}
 
         http('/rooms/%s/send/m.room.message?access_token=%s'
-            %(room_id, urllib.quote(self.access_token)), data, 'http_cb')
+            %(urllib.quote(room_id), urllib.quote(self.access_token)), data, 'http_cb')
 
+    def emote(self, room_id, body):
+        self.msg(room_id, body, msgtype='m.emote')
 
 def buffer_input_cb(b, buffer, data):
     for r_id, room in SERVER.rooms.items():
@@ -349,8 +351,19 @@ class Room(object):
                     + '_matrix/media/v1/download/')
                 body = content['body'] + ' ' + url
             elif content['msgtype'] == 'm.notice':
-                color = w.color(w.config_string('irc.color.notice'))
+                color = w.color(
+                        w.config_string(
+                        w.config_get('irc.color.notice')))
                 body = content['body']
+
+            elif content['msgtype'] == 'm.emote':
+                prefix = w.config_string(
+                        w.config_get('weechat.look.prefix_action'))
+                body = "{}{} {}{}".format(
+                    nick_c, nick, color, content['body']
+                )
+                nick_c = color
+                nick = prefix
             else:
                 body = content['body']
                 w.prnt('', 'Uknown content type')
@@ -385,6 +398,15 @@ def part_command_cb(data, current_buffer, args):
     room = SERVER.findRoom(current_buffer)
     if room:
         SERVER.part(room)
+        return w.WEECHAT_RC_OK_EAT
+    else:
+        return w.WEECHAT_RC_OK
+
+def emote_command_cb(data, current_buffer, args):
+    room = SERVER.findRoom(current_buffer)
+    if room:
+        msg = " ".join(args.split()[1:])
+        SERVER.emote(room.identifier, msg)
         return w.WEECHAT_RC_OK_EAT
     else:
         return w.WEECHAT_RC_OK
@@ -426,6 +448,7 @@ if __name__ == "__main__" and \
     w.hook_command_run('/join', 'join_command_cb', '')
     w.hook_command_run('/part', 'part_command_cb', '')
     w.hook_command_run('/leave', 'part_command_cb', '')
+    w.hook_command_run('/me', 'emote_command_cb', '')
     # Such elegance, much woe.
     cmds = {k[8:]: v for k, v in globals().items() if k.startswith("command_")}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
