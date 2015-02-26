@@ -239,7 +239,7 @@ class MatrixServer(object):
         self.polling = True
         data = urllib.urlencode({
             'access_token': self.access_token,
-            'timeout': 5000,
+            'timeout': 1000*30,
             'from': self.end
         })
         http('/events?%s'%(data), {}, 'http_cb')
