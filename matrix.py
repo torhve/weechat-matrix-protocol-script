@@ -45,8 +45,11 @@ def unload():
     w.unhook(SERVER.polltimer)
     return w.WEECHAT_RC_OK
 
+def wconf(optionname):
+    return w.config_string(w.config_get(optionname))
+
 def wcolor(optionname):
-    return w.color(w.config_string(w.config_get(optionname)))
+    return w.color(wconf(optionname))
 
 def command_help(current_buffer, args):
     help_cmds = { k[8:]: v.__doc__ for k, v in globals().items() if k.startswith("command_") }
@@ -416,6 +419,17 @@ class Room(object):
                 self.users[chunk['user_id']] = nick
                 w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
                     nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
+
+                time_int = int(time.time()-chunk['age']/1000)
+                color = wcolor("irc.color.topic_new")
+                data = '{}{}\t{}{}{} joined.'.format(
+                    wcolor('weechat.color.chat_prefix_join'),
+                    wconf('weechat.look.prefix_join'),
+                    w.info_get('irc_nick_color', nick),
+                    nick,
+                    wcolor('irc.color.message_join'),
+                )
+                w.prnt_date_tags(self.channel_buffer, time_int, "irc_join", data)
         elif chunk['type'] == 'm.typing':
             ''' TODO: Typing notices. '''
         else:
