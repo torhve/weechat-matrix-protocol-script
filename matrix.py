@@ -138,8 +138,7 @@ def http_cb(data, command, rc, stdout, stderr):
                 # TODO errorcode: M_FORBIDDEN
                 dbg(js)
         elif '/send/' in command:
-            if js:
-                dbg(js)
+            ''' XXX Errorhandling '''
         else:
             w.prnt('', 'Uknown command in http cb')
             dbg(command)
@@ -434,7 +433,7 @@ class Room(object):
                 w.prnt_date_tags(self.channel_buffer, time_int, "irc_join", data)
             if chunk['content']['membership'] == 'leave':
                 ### TODO delnick logic
-                nick = chunk['content'].get('displayname', chunk['user_id'])
+                nick = chunk['prev_content'].get('displayname', chunk['user_id'])
                 if chunk['user_id'] in self.users:
                     del self.users[chunk['user_id']]
                 #TODO delnick w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
