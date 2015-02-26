@@ -421,8 +421,7 @@ class Room(object):
                     nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
 
                 time_int = int(time.time()-chunk['age']/1000)
-                color = wcolor("irc.color.topic_new")
-                data = '{}{}\t{}{}{} joined.'.format(
+                data = '{}{}\t{}{}{} joined the room.'.format(
                     wcolor('weechat.color.chat_prefix_join'),
                     wconf('weechat.look.prefix_join'),
                     w.info_get('irc_nick_color', nick),
@@ -430,6 +429,22 @@ class Room(object):
                     wcolor('irc.color.message_join'),
                 )
                 w.prnt_date_tags(self.channel_buffer, time_int, "irc_join", data)
+            if chunk['content']['membership'] == 'leave':
+                ### TODO delnick logic
+                nick = chunk['content'].get('displayname', chunk['user_id'])
+                if chunk['user_id'] in self.users:
+                    del self.users[chunk['user_id']]
+                #TODO delnick w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
+                #    nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
+                time_int = int(time.time()-chunk['age']/1000)
+                data = '{}{}\t{}{}{} left the room.'.format(
+                    wcolor('weechat.color.chat_prefix_quit'),
+                    wconf('weechat.look.prefix_quit'),
+                    w.info_get('irc_nick_color', nick),
+                    nick,
+                    wcolor('irc.color.message_quit'),
+                )
+                w.prnt_date_tags(self.channel_buffer, time_int, "irc_quit", data)
         elif chunk['type'] == 'm.typing':
             ''' TODO: Typing notices. '''
         else:
