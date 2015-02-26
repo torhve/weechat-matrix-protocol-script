@@ -14,7 +14,11 @@ import json
 import urllib
 import urlparse
 #import HTMLParser
+import sys
 
+# Very ugly hack to kill all unicode errors with fire.
+reload(sys)
+sys.setdefaultencoding('utf-8')
 import weechat as w
 
 SCRIPT_NAME = "matrix"
