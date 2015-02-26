@@ -93,6 +93,9 @@ def http(url, post, cb, timeout=30*1000):
 
 STDOUT = {}
 def http_cb(data, command, rc, stdout, stderr):
+    if stderr != '':
+        w.prnt('', '{}: {}'.format(SCRIPT_NAME, stderr))
+        return w.WEECHAT_RC_OK
 
     if stdout != '':
         if not command in STDOUT:
