@@ -199,7 +199,7 @@ class MatrixServer(object):
             'access_token': self.access_token,
             'limit': w.config_get_plugin('backlog_lines'),
         })
-        http('/initialSync?%s'%data, None, 'http_cb')
+        http('/initialSync?%s'%data, {}, 'http_cb')
 
     def join(self, room):
         if not self.connected:
@@ -231,7 +231,7 @@ class MatrixServer(object):
                 'limit': w.config_get_plugin('backlog_lines'),
             })
             http('/rooms/%s/messages?%s'
-               %(urllib.quote(room), data), None, 'http_cb')
+               %(urllib.quote(room), data), {}, 'http_cb')
 
     def poll(self):
         if self.connected == False or self.polling:
@@ -242,7 +242,7 @@ class MatrixServer(object):
             'timeout': 5000,
             'from': self.end
         })
-        http('/events?%s'%(data), None, 'http_cb')
+        http('/events?%s'%(data), {}, 'http_cb')
 
 
     def addRoom(self, room):
@@ -374,6 +374,9 @@ class Room(object):
                 nick_c = w.info_get('irc_nick_color', nick)
             content = chunk['content']
             body = ''
+            if not 'msgtype' in content:
+                ''' We don't support redactions '''
+                return
             if content['msgtype'] == 'm.text':
                 body = content['body']
             elif content['msgtype'] == 'm.image':
