@@ -401,7 +401,8 @@ class Room(object):
                 w.prnt('', 'Uknown content type')
                 dbg(content)
             data = "{}{}\t{}{}".format(nick_c, nick, color, body)
-            w.prnt_date_tags(self.channel_buffer, time_int, tags, data)
+            w.prnt_date_tags(self.channel_buffer, time_int, tags,
+                data.encode('UTF-8'))
         elif chunk['type'] == 'm.room.topic':
             title = chunk['content']['topic']
             w.buffer_set(self.channel_buffer, "title", title)
@@ -415,7 +416,8 @@ class Room(object):
                     title,
                     default_color
                   )
-            w.prnt_date_tags(self.channel_buffer, int(time.time()), "", data)
+            w.prnt_date_tags(self.channel_buffer, int(time.time()), "",
+                data.encode('UTF-8'))
         elif chunk['type'] == 'm.room.name':
             name = chunk['content']['name']
             w.buffer_set(self.channel_buffer, "short_name", name)
@@ -436,7 +438,8 @@ class Room(object):
                     nick,
                     wcolor('irc.color.message_join'),
                 )
-                w.prnt_date_tags(self.channel_buffer, time_int, "irc_join", data)
+                w.prnt_date_tags(self.channel_buffer, time_int, "irc_join",
+                    data.encode('UTF-8'))
             if chunk['content']['membership'] == 'leave':
                 ### TODO delnick logic
                 nick = chunk['prev_content'].get('displayname', chunk['user_id'])
@@ -452,7 +455,8 @@ class Room(object):
                     nick,
                     wcolor('irc.color.message_quit'),
                 )
-                w.prnt_date_tags(self.channel_buffer, time_int, "irc_quit", data)
+                w.prnt_date_tags(self.channel_buffer, time_int, "irc_quit",
+                    data.encode('UTF-8'))
         elif chunk['type'] == 'm.typing':
             ''' TODO: Typing notices. '''
         else:
