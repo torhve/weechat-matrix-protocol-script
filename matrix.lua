@@ -728,7 +728,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- set default settings
     local version = w.info_get('version_number', '') or 0
     for option, value in pairs(settings) do
-        if w.config_is_set_plugin(option) then
+        if w.config_is_set_plugin(option) == 1 then
             CONF[option] = w.config_get_plugin(option)
         else
             w.config_set_plugin(option, value[1])
