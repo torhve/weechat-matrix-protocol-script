@@ -63,7 +63,7 @@ def format_nick(nick, is_self):
     if is_self:
         color = w.color('chat_nick_self')
     else:
-        color = w.color(w.info_get('irc_nick_color', nick))
+        color = w.info_get('irc_nick_color', nick)
     prefix = wconf('weechat.look.nick_prefix')
     prefix_c = wcolor('weechat.color.chat_nick_prefix')
     suffix = wconf('weechat.look.nick_suffix')
@@ -413,7 +413,7 @@ class Room(object):
 
         is_self = False
         # Check if own message
-        if chunk['user_id'] == SERVER.user_id:
+        if chunk.get('user_id', '') == SERVER.user_id:
             is_self = True
 
         if chunk['type'] == 'm.room.message':
