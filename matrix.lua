@@ -157,15 +157,13 @@ function command_connect(current_buffer, args)
     if not SERVER.connected then
         SERVER:connect()
     end
+    return w.WEECHAT_RC_OK
 end
 
 function matrix_command_cb(data, current_buffer, args)
-    local a = split(args)
-    local function_name
-    if #a > 1 then
-        function_name, args = a[1], table.concat(a[1], " ")
-    else
-        function_name, args = a[1], nil
+    local function_name, arg = args:match('^(.-) (.*)$')
+    if function_name == 'connect' then
+        return command_connect(current_buffer, arg)
     end
     --local command = cmds[function_name](current_buffer, args)
     --if not command then
