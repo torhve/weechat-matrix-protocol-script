@@ -264,7 +264,7 @@ function http_cb(data, command, rc, stdout, stderr)
             SERVER:initial_sync()
         elseif command:find'initialSync' then
             for _, room in pairs(js['rooms']) do
-                myroom = SERVER:addRoom(room)
+                local myroom = SERVER:addRoom(room)
                 for _, chunk in pairs(room['messages']['chunk']) do
                     myroom:parseChunk(chunk, true)
                 end
@@ -538,7 +538,8 @@ function Room:parseChunk(chunk, backlog)
             tags = tags .. ",notify_none,no_higlight,no_log,logger_backlog_end"
         end
 
-        local time_int = os.time()-chunk['age']/1000
+        --local time_int = os.time()-chunk['age']/1000
+        local time_int = chunk['origin_server_ts']/1000
         local color = default_color
         local nick
         local nick_c
@@ -617,7 +618,8 @@ function Room:parseChunk(chunk, backlog)
             w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
                 nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
 
-            local time_int = os.time()-chunk['age']/1000
+            --local time_int = os.time()-chunk['age']/1000
+            local time_int = chunk['origin_server_ts']/1000
             local data = ('%s%s\t%s%s%s joined the room.'):format(
                 wcolor('weechat.color.chat_prefix_join'),
                 wconf('weechat.look.prefix_join'),
@@ -637,7 +639,8 @@ function Room:parseChunk(chunk, backlog)
             end
             --TODO delnick w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
             --    nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
-            local time_int = os.time()-chunk['age']/1000
+            --local time_int = os.time()-chunk['age']/1000
+            local time_int = chunk['origin_server_ts']/1000
             local data = ('%s%s\t%s%s%s left the room.'):format(
                 wcolor('weechat.color.chat_prefix_quit'),
                 wconf('weechat.look.prefix_quit'),
