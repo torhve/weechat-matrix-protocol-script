@@ -57,6 +57,27 @@ def wconf(optionname):
 def wcolor(optionname):
     return w.color(wconf(optionname))
 
+def format_nick(nick, is_self):
+    ''' Turns a nick name into a weechat-styled nickname. This means giving
+    it colors, and proper prefix and suffix '''
+    if is_self:
+        color = w.color('chat_nick_self')
+    else:
+        color = w.color(w.info_get('irc_nick_color', nick))
+    prefix = wconf('weechat.look.nick_prefix')
+    prefix_c = wcolor('weechat.color.chat_nick_prefix')
+    suffix = wconf('weechat.look.nick_suffix')
+    suffix_c = wcolor('weechat.color.chat_nick_suffix')
+    nick_f = "{}{}{}{}{}{}".format(
+        prefix_c,
+        prefix,
+        color,
+        nick,
+        suffix_c,
+        suffix
+    )
+    return nick_f
+
 def command_help(current_buffer, args):
     help_cmds = { k[8:]: v.__doc__ for k, v in globals().items() if k.startswith("command_") }
 
@@ -110,10 +131,14 @@ def poll_cb(data, command, rc, stdout, stderr):
     if int(rc) >= 0:
         stdout = "".join(STDOUT[command])
         del STDOUT[command]
-        js = json.loads(stdout)
+        try:
+            js = json.loads(stdout)
+        except Exception, e:
+            w.prnt('', '{}: Error: {} during json load: {}'.format(SCRIPT_NAME, e, stdout))
+            js = []
         if 'errcode' in js:
             w.prnt('', '{}: {}'.format(SCRIPT_NAME, js['errcode']))
-        else:
+        elif js:
             SERVER.end = js['end']
             for chunk in js.get('chunk', []):
                 if 'room_id' in chunk:
@@ -121,6 +146,8 @@ def poll_cb(data, command, rc, stdout, stderr):
                     if room:
                         room.parseChunk(chunk)
     if int(rc) == -2 or int(rc) >= 0:
+        if command in STDOUT:
+            del STDOUT[command]
         SERVER.polling = False
         SERVER.poll()
     return w.WEECHAT_RC_OK
@@ -154,7 +181,7 @@ def http_cb(data, command, rc, stdout, stderr):
             for room in js['rooms']:
                 myroom = SERVER.addRoom(room)
                 for chunk in room['messages']['chunk']:
-                    myroom.parseChunk(chunk)
+                    myroom.parseChunk(chunk, backlog=True)
             SERVER.poll()
         elif 'messages' in command:
             for chunk in reversed(js.get('chunk', [])):
@@ -189,8 +216,8 @@ class MatrixServer(object):
         self.end = 'END'
         self.connect()
         # Timer used in cased of errors to restart the polling cycle
-        # During normal operation the polling should re-invok itself
-        self.polltimer = w.hook_timer(30*1000, 0, 0, "poll", "")
+        # During normal operation the polling should re-invoke itself
+        self.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
 
     def _getPost(self, post):
         extra = {
@@ -381,9 +408,20 @@ class Room(object):
                 w.info_get('irc_nick_color_name', nick), '', '', 1)
         return nick
 
-    def parseChunk(self, chunk):
+    def parseChunk(self, chunk, backlog=False):
+        ''' Parses a chunk of json meant for a room '''
+
+        is_self = False
+        # Check if own message
+        if chunk['user_id'] == SERVER.user_id:
+            is_self = True
+
         if chunk['type'] == 'm.room.message':
             tags = "notify_message"
+
+            if backlog:
+                tags += ",notify_none,no_higlight,no_log,logger_backlog_end"
+
             time_int = int(time.time()-chunk['age']/1000)
             color = default_color
             nick = ''
@@ -391,8 +429,7 @@ class Room(object):
                 nick = self.users[chunk['user_id']]
             else:
                 nick = self.addNick(chunk)
-            # Check if own message
-            if chunk['user_id'] == SERVER.user_id:
+            if is_self:
                 w.buffer_set(self.channel_buffer, "localvar_set_nick",
                         self.users[SERVER.user_id])
                 tags += ",no_highlight"
@@ -416,6 +453,7 @@ class Room(object):
                 body = content['body']
 
             elif content['msgtype'] == 'm.emote':
+                tags += ",irc_action"
                 prefix = w.config_string(
                         w.config_get('weechat.look.prefix_action'))
                 body = "{}{} {}{}".format(
@@ -427,7 +465,10 @@ class Room(object):
                 body = content['body']
                 w.prnt('', 'Uknown content type')
                 dbg(content)
-            data = "{}{}\t{}{}".format(nick_c, nick, color, body)
+            data = "{}\t{}{}".format(
+                    format_nick(nick, is_self),
+                    color,
+                    body)
             w.prnt_date_tags(self.channel_buffer, time_int, tags,
                 data)
         elif chunk['type'] == 'm.room.topic':
@@ -435,9 +476,8 @@ class Room(object):
             w.buffer_set(self.channel_buffer, "title", title)
             color = wcolor("irc.color.topic_new")
             nick = self.users[SERVER.user_id]
-            data = '--\t{}{}{} has changed the topic to "{}{}{}"'.format(
-                    w.info_get('irc_nick_color', nick),
-                    nick,
+            data = '--\t{}{} has changed the topic to "{}{}{}"'.format(
+                    format_nick(nick, is_self),
                     default_color,
                     color,
                     title,
@@ -463,13 +503,16 @@ class Room(object):
                     wconf('weechat.look.prefix_join'),
                     w.info_get('irc_nick_color', nick),
                     nick,
-                    wcolor('irc.color.message_join'),
+                    wcolor('irc.color.message_join')
                 )
                 w.prnt_date_tags(self.channel_buffer, time_int, "irc_join",
                     data)
             if chunk['content']['membership'] == 'leave':
                 ### TODO delnick logic
-                nick = chunk['prev_content'].get('displayname', chunk['user_id'])
+                nick = chunk['prev_content'].get('displayname')
+                if not nick:
+                    nick = chunk['user_id']
+                dbg(chunk)
                 if chunk['user_id'] in self.users:
                     del self.users[chunk['user_id']]
                 #TODO delnick w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
@@ -480,10 +523,16 @@ class Room(object):
                     wconf('weechat.look.prefix_quit'),
                     w.info_get('irc_nick_color', nick),
                     nick,
-                    wcolor('irc.color.message_quit'),
+                    wcolor('irc.color.message_quit')
                 )
                 w.prnt_date_tags(self.channel_buffer, time_int, "irc_quit",
                     data)
+        elif chunk['type'] == 'm.room.create':
+            ''' TODO: parse create events '''
+        elif chunk['type'] == 'm.room.power_levels':
+            ''' TODO: parse power lvls events '''
+        elif chunk['type'] == 'm.room.join_rules':
+            ''' TODO: parse join_rules events '''
         elif chunk['type'] == 'm.typing':
             ''' TODO: Typing notices. '''
         else:
@@ -545,7 +594,7 @@ def create_matrix_buffer():
 
 if __name__ == "__main__" and \
     w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE,
-        SCRIPT_DESC, "unload", ""):
+        SCRIPT_DESC, "unload", "UTF-8"):
     settings = {
         'homeserver_url': ('https://matrix.org/', 'Full URL including port to your homeserver or use default matrix.org'),
         'user': ('', 'Your homeserver username'),
