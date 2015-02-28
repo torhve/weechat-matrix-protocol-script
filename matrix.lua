@@ -10,7 +10,6 @@
 
 
 local json = require 'cjson'
-local os = require 'os'
 local w = weechat
 
 local SCRIPT_NAME = "matrix"
@@ -319,7 +318,7 @@ end
 
 function MatrixServer:findRoom(buffer_ptr)
     for id, room in pairs(self.rooms) do
-        if room.channel_buffer == buffer_ptr then
+        if room.buffer == buffer_ptr then
             return room
         end
     end
@@ -438,7 +437,7 @@ end
 
 function buffer_input_cb(b, buffer, data)
     for r_id, room in pairs(SERVER.rooms) do
-        if buffer == room.channel_buffer then
+        if buffer == room.buffer then
             SERVER:msg(r_id, data)
         end
     end
@@ -450,9 +449,10 @@ Room.__index = Room
 Room.create = function(obj)
     local room = {}
     setmetatable(room, Room)
-    room.channel_buffer = nil
+    room.buffer = nil
     room.identifier = obj['room_id']
     room.server = 'matrix'
+    room.member_count = 0
     for _, state in pairs(obj['state']) do
         if state['type'] == 'm.room.aliases' then
             local name = state['content']['aliases'][1]
@@ -487,51 +487,90 @@ function Room:emote(msg)
 end
 
 function Room:create_buffer()
-    local channel_buffer = w.buffer_search("", ("%s.%s"):format(self.server, self.name))
-    if channel_buffer ~= '' then
-        self.channel_buffer = channel_buffer
+    local buffer = w.buffer_search("", ("%s.%s"):format(self.server, self.name))
+    if buffer ~= '' then
+        self.buffer = buffer
     else
-        self.channel_buffer = w.buffer_new(("%s.%s")
+        self.buffer = w.buffer_new(("%s.%s")
             :format(self.server, self.name), "buffer_input_cb",
             self.name, "", "")
         -- Defined in weechat's irc-nick.h
-        self.nicklist_group = w.nicklist_add_group(self.channel_buffer,
+        self.nicklist_group = w.nicklist_add_group(self.buffer,
                 '', "999|...", "weechat.color.nicklist_group", 1)
     end
-    w.buffer_set(self.channel_buffer, "nicklist", "1")
-    w.buffer_set(self.channel_buffer, "nicklist_display_groups", "0")
-    --TODO
-    --weechat.buffer_set(self.channel_buffer, "highlight_words", self.nick)
+    w.buffer_set(self.buffer, "nicklist", "1")
+    w.buffer_set(self.buffer, "nicklist_display_groups", "0")
     -- TODO maybe use servername of homeserver?
-    w.buffer_set(self.channel_buffer, "localvar_set_server", self.server)
-    w.buffer_set(self.channel_buffer, "short_name", self.name)
-    w.buffer_set(self.channel_buffer, "name", self.name)
+    w.buffer_set(self.buffer, "localvar_set_server", self.server)
+    w.buffer_set(self.buffer, "short_name", self.name)
+    w.buffer_set(self.buffer, "name", self.name)
     -- Doesn't work
-    --w.buffer_set(self.channel_buffer, "plugin", "matrix")
-    w.buffer_set(self.channel_buffer, "full_name",
+    --w.buffer_set(self.buffer, "plugin", "matrix")
+    w.buffer_set(self.buffer, "full_name",
         self.server.."."..self.name)
-    -- TODO, needs better logic for detection of "private chat"
-    if self.visibility == "private" then
-        w.buffer_set(self.channel_buffer, "localvar_set_type", 'private')
-    elseif self.visibility == "public" then
-        w.buffer_set(self.channel_buffer, "localvar_set_type", 'channel')
-    else
-        dbg(self.visbility)
-    end
 end
 
-function Room:addNick(obj)
-    local nick = obj.user_id:match('@(.+):(.+)')
-    self.users[obj['user_id']] = nick
-    w.nicklist_add_nick(self.channel_buffer, self.nicklist_group, nick,
-            w.info_get('irc_nick_color_name', nick), '', '', 1)
-    return nick
+function Room:addNick(obj, displayname)
+    if not displayname then
+        displayname = obj.user_id:match('@(.+):(.+)')
+    end
+    if not self.users[obj.user_id] then
+        self.users[obj['user_id']] = displayname
+        self.member_count = self.member_count + 1
+        local nick_c
+        -- Check if this is ourselves
+        if obj.user_id == SERVER.user_id then
+            w.buffer_set(self.buffer, "highlight_words", displayname)
+            w.buffer_set(self.buffer, "localvar_set_nick", displayname)
+            nick_c = w.color('chat_nick_self')
+        else
+            nick_c = w.info_get('irc_nick_color_name', displayname)
+        end
+        w.nicklist_add_nick(self.buffer,
+            self.nicklist_group,
+            displayname,
+            nick_c, '', '', 1)
+
+        -- Check the user count, if it's 2 or less then we decide this buffer
+        -- is a "private" one like IRC's query type
+        if self.member_count == 3 then -- don't run code for every add > 2
+            w.buffer_set(self.buffer, "localvar_set_type", 'channel')
+        elseif self.member_count == 2 then
+            -- At the point where we reach two nicks, set the buffer name to be
+            -- the display name of the other guy that is not our self since it's
+            -- in effect a query, but the matrix protocol doesn't have such
+            -- a concept
+            w.buffer_set(self.buffer, "localvar_set_type", 'private')
+            w.buffer_set(self.buffer, "localvar_set_server", self.server)
+            -- Check if the room name is identifier meaning we don't have a
+            -- name set yet, and should try and set one
+            local buffer_name = w.buffer_get_string(self.buffer, 'name')
+            if buffer_name:match('^!(.-):(.-)%.(.-)$') then
+                for id, name in pairs(self.users) do
+                    if id ~= SERVER.user_id then
+                        dbg('Setting new name:' .. name)
+                        w.buffer_set(self.buffer, "short_name", name)
+                        w.buffer_set(self.buffer, "name", name)
+                        w.buffer_set(self.buffer, "full_name",
+                        self.server.."."..name)
+                    end
+                end
+            end
+        end
+    end
+
+    return displayname
 end
 
 function Room:parseChunk(chunk, backlog)
+    local tags = ''
     -- Parses a chunk of json meant for a room 
     if not backlog then
         backlog = false
+    end
+
+    if backlog then
+        tags = "notify_none,no_higlight,no_log,logger_backlog_end"
     end
 
     local is_self = false
@@ -541,26 +580,16 @@ function Room:parseChunk(chunk, backlog)
     end
 
     if chunk['type'] == 'm.room.message' then
-        local tags = "notify_message"
+        tags = tags .. ",notify_message"
 
-        if backlog then
-            tags = tags .. ",notify_none,no_higlight,no_log,logger_backlog_end"
-        end
 
         --local time_int = os.time()-chunk['age']/1000
         local time_int = chunk['origin_server_ts']/1000
         local color = default_color
-        local nick
         local nick_c
         local body
-        if self.users[chunk['user_id']] then
-            nick = self.users[chunk['user_id']]
-        else
-            nick = self:addNick(chunk)
-        end
+        local nick = self:addNick(chunk)
         if is_self then
-            w.buffer_set(self.channel_buffer, "localvar_set_nick",
-                    self.users[SERVER.user_id])
             tags = tags .. ",no_highlight"
             nick_c = w.color('chat_nick_self')
         else
@@ -579,11 +608,17 @@ function Room:parseChunk(chunk, backlog)
                 .. '_matrix/media/v1/download/')
             body = content['body'] .. ' ' .. url
         elseif content['msgtype'] == 'm.notice' then
+            if is_self then
+                tags = tags .. ",no_highlight"
+            end
             color = wcolor('irc.color.notice')
             body = content['body']
 
         elseif content['msgtype'] == 'm.emote' then
-            tags = ",irc_action"
+            tags = tags .. ",irc_action"
+            if is_self then
+                tags = tags .. ",no_highlight"
+            end
             local prefix = w.config_string(
                     w.config_get('weechat.look.prefix_action'))
             body = ("%s%s %s%s"):format(
@@ -599,11 +634,14 @@ function Room:parseChunk(chunk, backlog)
                 format_nick(nick, is_self),
                 color,
                 body)
-        w.print_date_tags(self.channel_buffer, time_int, tags,
+        w.print_date_tags(self.buffer, time_int, tags,
             data)
     elseif chunk['type'] == 'm.room.topic' then
+        if is_self then
+            tags = tags .. ",no_highlight"
+        end
         local title = chunk['content']['topic']
-        w.buffer_set(self.channel_buffer, "title", title)
+        w.buffer_set(self.buffer, "title", title)
         local color = wcolor("irc.color.topic_new")
         local nick = self.users[chunk.user_id] or chunk.user_id
         local data = ('--\t%s%s has changed the topic to "%s%s%s"'):format(
@@ -613,19 +651,16 @@ function Room:parseChunk(chunk, backlog)
                 title,
                 default_color
               )
-        w.print_date_tags(self.channel_buffer, os.time(), "",
+        w.print_date_tags(self.buffer, chunk.origin_server_ts, tags,
             data)
     elseif chunk['type'] == 'm.room.name' then
         local name = chunk['content']['name']
-        w.buffer_set(self.channel_buffer, "short_name", name)
+        w.buffer_set(self.buffer, "short_name", name)
     elseif chunk['type'] == 'm.room.member' then
         -- TODO presence, leave, invite
         if chunk['content']['membership'] == 'join' then
-            --## TODO addnick logic
-            local nick = chunk['content']['displayname']
-            self.users[chunk['user_id']] = nick
-            w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
-                nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
+            local tags = "irc_join,no_highlight"
+            local nick = self:addNick(chunk, chunk['content']['displayname'])
 
             --local time_int = os.time()-chunk['age']/1000
             local time_int = chunk['origin_server_ts']/1000
@@ -636,8 +671,7 @@ function Room:parseChunk(chunk, backlog)
                 nick,
                 wcolor('irc.color.message_join')
             )
-            w.print_date_tags(self.channel_buffer, time_int, "irc_join",
-                data)
+            w.print_date_tags(self.buffer, time_int, tags, data)
         elseif chunk['content']['membership'] == 'leave' then
             --## TODO delnick logic
             local nick = chunk['prev_content'].displayname
@@ -646,7 +680,7 @@ function Room:parseChunk(chunk, backlog)
             if self.users[chunk['user_id']] then
                 self.users[chunk['user_id']] = nil
             end
-            --TODO delnick w.nicklist_add_nick(self.channel_buffer, self.nicklist_group,
+            --TODO delnick w.nicklist_add_nick(self.buffer, self.nicklist_group,
             --    nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
             --local time_int = os.time()-chunk['age']/1000
             local time_int = chunk['origin_server_ts']/1000
@@ -657,7 +691,7 @@ function Room:parseChunk(chunk, backlog)
                 nick,
                 wcolor('irc.color.message_quit')
             )
-            w.print_date_tags(self.channel_buffer, time_int, "irc_quit",
+            w.print_date_tags(self.buffer, time_int, "irc_quit",
                 data)
         end
     end
