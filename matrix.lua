@@ -446,14 +446,38 @@ function send(data, calls)
             msgtype = msg[1]
             table.insert(body, msg[2])
         end
+        body = table.concat(body, '\n')
 
         local data = {
             accept_encoding = 'application/json',
             transfer = 'application/json',
-            postfields= json.encode({
+            postfields= {
                 msgtype = msgtype,
-                body = table.concat(body, '\n')
-        })}
+                body = body,
+        }}
+
+        -- Support sending bold text
+        if body:match('\02') then
+            local inside = false
+            local htmlbody = body:gsub('\02', function(c)
+                dbg(inside)
+                if inside then
+                    inside = false
+                    return '</b>'
+                end
+                inside = true
+                return '<b>'
+            end)
+            if not htmlbody:match('</b>') then
+                htmlbody = htmlbody .. '</b>'
+            end
+            data.postfields.format = 'org.matrix.custom.html'
+            data.postfields.formatted_body = htmlbody
+            data.postfields.body = body:gsub('\02', '')
+        end
+
+        data.postfields = json.encode(data.postfields)
+
 
         http(('/rooms/%s/send/m.room.message?access_token=%s')
             :format(
