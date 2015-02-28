@@ -39,6 +39,8 @@ local function tprint (tbl, indent, out)
             tprint(v, indent+1)
         elseif type(v) == 'boolean' then
             w.print('', formatting .. tostring(v))
+        elseif type(v) == 'userdata' then
+            w.print('', formatting .. tostring(v))
         else
             w.print('', formatting .. v)
         end
@@ -107,7 +109,6 @@ local function split_args(args)
 end
 
 function unload()
-    w.unhook(SERVER.polltimer)
     return w.WEECHAT_RC_OK
 end
 
@@ -174,15 +175,18 @@ function matrix_command_cb(data, current_buffer, args)
     return w.WEECHAT_RC_OK
 end
 
-local function http(url, post, cb, timeout)
+local function http(url, post, cb, timeout, extra)
     if not timeout then
         timeout = 30*1000
+    end
+    if not extra then
+        extra = ''
     end
 
     local homeserver_url = w.config_get_plugin('homeserver_url')
     homeserver_url = homeserver_url .. "_matrix/client/api/v1"
     url = homeserver_url .. url
-    w.hook_process_hashtable('url:' .. url, post, timeout, cb, '')
+    w.hook_process_hashtable('url:' .. url, post, timeout, cb, extra)
 end
 
 function poll_cb(data, command, rc, stdout, stderr)
@@ -249,12 +253,9 @@ function http_cb(data, command, rc, stdout, stderr)
         stdout = table.concat(STDOUT[command])
         STDOUT[command] = nil
         local js = json.decode(stdout)
-        if false then --- pcall
-            w.print('', ('%s Error: %s during json load: %s'):format(SCRIPT_NAME, e, stdout))
-            js = {}
-        end
         if js['errcode'] then
-            w.print('', ('%s: %s'):format(SCRIPT_NAME, js['errcode']))
+            w.print(BUFFER, ('error\t%s'):format(js['error']))
+            return w.WEECHAT_RC_OK
         end
         -- Get correct handler
         if command:find('login') then
@@ -263,6 +264,11 @@ function http_cb(data, command, rc, stdout, stderr)
             end
             SERVER.connected = true
             SERVER:initial_sync()
+        elseif command:find'/rooms/.*/initialSync' then
+            local myroom = SERVER:addRoom(js)
+            for _, chunk in pairs(js['messages']['chunk']) do
+                myroom:parseChunk(chunk, true)
+            end
         elseif command:find'initialSync' then
             for _, room in pairs(js['rooms']) do
                 local myroom = SERVER:addRoom(room)
@@ -271,8 +277,30 @@ function http_cb(data, command, rc, stdout, stderr)
                 end
             end
             SERVER:poll()
-        elseif command:find'leave' then
+        elseif command:find'messages' then
             dbg(js)
+        elseif command:find'/join/' then
+            -- We came from a join command, fecth some messages
+            local found = false
+            for id, _ in pairs(SERVER.rooms) do
+                if id == js.room_id then
+                    found = true
+                    w.print(BUFFER, 'error\tNot joining room, already in it.')
+                    break
+                end
+            end
+            if not found then
+                local data = urllib.urlencode({
+                    access_token= SERVER.access_token,
+                    --limit= w.config_get_plugin('backlog_lines'),
+                    limit = 10,
+                })
+                http(('/rooms/%s/initialSync?%s'):format(urllib.quote(js.room_id), data), {}, 'http_cb')
+            end
+        elseif command:find'leave' then
+            -- We store room_id in data
+            local room_id = data
+            SERVER:delRoom(room_id)
         elseif command:find'/state/' then
             -- TODO errorcode: M_FORBIDDEN
             dbg(js)
@@ -357,12 +385,24 @@ function MatrixServer:initial_sync()
     http('/initialSync?'..data, {}, 'http_cb')
 end
 
+function MatrixServer:getMessages(room_id)
+    local data = urllib.urlencode({
+        access_token= self.access_token,
+        dir = 'b',
+        from = 'END',
+        limit = w.config_get_plugin('backlog_lines'),
+    })
+    http(('/rooms/%s/messages?%s')
+        :format(urllib.quote(room_id), data), {}, 'http_cb')
+end
+
 function MatrixServer:join(room)
     if not self.connected then
         --XXX'''
         return
     end
 
+    w.print(BUFFER, '\tJoining room '..room)
     room = urllib.quote(room)
     http('/join/' .. room,
         {postfields= "access_token="..self.access_token}, 'http_cb')
@@ -374,12 +414,13 @@ function MatrixServer:part(room)
         return
     end
 
-    room = urllib.quote(room.identifier)
+    local id = urllib.quote(room.identifier)
     local data = urllib.urlencode({
         access_token= self.access_token,
     })
     -- TODO: close buffer, delete data, etc
-    http(('/rooms/%s/leave?%s'):format(room,data), {postfields= "{}"}, 'http_cb')
+    http(('/rooms/%s/leave?%s'):format(id, data), {postfields= "{}"},
+        'http_cb', 10000, room.identifier)
 end
 
 function MatrixServer:poll()
@@ -399,6 +440,18 @@ function MatrixServer:addRoom(room)
     local myroom = Room.create(room)
     myroom:create_buffer()
     self.rooms[room['room_id']] = myroom
+    return myroom
+end
+
+function MatrixServer:delRoom(room_id)
+    for id, room in pairs(self.rooms) do
+        if id == room_id then
+            w.print(BUFFER, '\tLeaving room '..room.server..':'..room.name)
+            room:destroy()
+            self.rooms[id] = nil
+            break
+        end
+    end
     return myroom
 end
 
@@ -460,7 +513,6 @@ function send(data, calls)
         if body:match('\02') then
             local inside = false
             local htmlbody = body:gsub('\02', function(c)
-                dbg(inside)
                 if inside then
                     inside = false
                     return '</b>'
@@ -580,6 +632,10 @@ function Room:create_buffer()
     --w.buffer_set(self.buffer, "plugin", "matrix")
     w.buffer_set(self.buffer, "full_name",
         self.server.."."..self.name)
+end
+
+function Room:destroy()
+    w.buffer_close(self.buffer)
 end
 
 function Room:addNick(obj, displayname)
