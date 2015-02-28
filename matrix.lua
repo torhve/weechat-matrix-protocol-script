@@ -23,6 +23,7 @@ local SCRIPT_COMMAND = SCRIPT_NAME
 local CONF = {}
 local SERVER
 local STDOUT = {}
+local OUT = {}
 local BUFFER
 local Room
 local MatrixServer
@@ -480,6 +481,14 @@ function Room:topic(topic)
     SERVER:state(self.identifier, 'm.room.topic', {topic=topic})
 end
 
+function Room:msg(msg)
+    SERVER:msg(self.identifier, msg)
+end
+
+function Room:emote(msg)
+    SERVER:emote(self.identifier, msg)
+end
+
 function Room:create_buffer()
     local channel_buffer = w.buffer_search("", ("%s.%s"):format(self.server, self.name))
     if channel_buffer ~= '' then
@@ -694,7 +703,7 @@ function emote_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
         local _, args = split_args(args)
-        SERVER:emote(room.identifier, args)
+        room:emote(args)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
