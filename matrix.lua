@@ -47,6 +47,7 @@ local function tprint (tbl, indent, out)
 end
 local function dbg(message)
     if type(message) == 'table' then
+        w.print("", 'Printing table: ' .. tostring(message))
         tprint(message)
     else
         message = ("DEBUG: %s"):format(tostring(message))
@@ -456,10 +457,6 @@ Room.create = function(obj)
         if state['type'] == 'm.room.aliases' then
             local name = state['content']['aliases'][1]
             room.name, room.server = name:match('(.+):(.+)')
-            if room.server == 'matrix.org' then
-                room.sever = 'matrix'
-                break
-            end
         end
     end
     if not room.name then
@@ -497,26 +494,29 @@ function Room:create_buffer()
         self.channel_buffer = w.buffer_new(("%s.%s")
             :format(self.server, self.name), "buffer_input_cb",
             self.name, "", "")
-        w.buffer_set(self.channel_buffer, "nicklist", "1")
-        w.buffer_set(self.channel_buffer, "nicklist_display_groups", "0")
         -- Defined in weechat's irc-nick.h
         self.nicklist_group = w.nicklist_add_group(self.channel_buffer,
                 '', "999|...", "weechat.color.nicklist_group", 1)
-        --TODO
-        --weechat.buffer_set(self.channel_buffer, "highlight_words", self.nick)
-        -- TODO maybe use servername of homeserver?
-        w.buffer_set(self.channel_buffer, "localvar_set_server", 'matrix')
-        w.buffer_set(self.channel_buffer, "short_name", self.name)
-        w.buffer_set(self.channel_buffer, "name", self.name)
-        w.buffer_set(self.channel_buffer, "full_name", "matrix."..self.name)
-        -- TODO, needs better logic for detection of "private chat"
-        if self.visibility == "private" then
-            w.buffer_set(self.channel_buffer, "localvar_set_type", 'private')
-        elseif self.visibility == "public" then
-            w.buffer_set(self.channel_buffer, "localvar_set_type", 'channel')
-        else
-            dbg(self.visbility)
-        end
+    end
+    w.buffer_set(self.channel_buffer, "nicklist", "1")
+    w.buffer_set(self.channel_buffer, "nicklist_display_groups", "0")
+    --TODO
+    --weechat.buffer_set(self.channel_buffer, "highlight_words", self.nick)
+    -- TODO maybe use servername of homeserver?
+    w.buffer_set(self.channel_buffer, "localvar_set_server", self.server)
+    w.buffer_set(self.channel_buffer, "short_name", self.name)
+    w.buffer_set(self.channel_buffer, "name", self.name)
+    -- Doesn't work
+    --w.buffer_set(self.channel_buffer, "plugin", "matrix")
+    w.buffer_set(self.channel_buffer, "full_name",
+        self.server.."."..self.name)
+    -- TODO, needs better logic for detection of "private chat"
+    if self.visibility == "private" then
+        w.buffer_set(self.channel_buffer, "localvar_set_type", 'private')
+    elseif self.visibility == "public" then
+        w.buffer_set(self.channel_buffer, "localvar_set_type", 'channel')
+    else
+        dbg(self.visbility)
     end
 end
 
@@ -605,7 +605,7 @@ function Room:parseChunk(chunk, backlog)
         local title = chunk['content']['topic']
         w.buffer_set(self.channel_buffer, "title", title)
         local color = wcolor("irc.color.topic_new")
-        local nick = self.users[SERVER.user_id]
+        local nick = self.users[chunk.user_id] or chunk.user_id
         local data = ('--\t%s%s has changed the topic to "%s%s%s"'):format(
                 format_nick(nick, is_self),
                 default_color,
