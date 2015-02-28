@@ -403,19 +403,67 @@ function MatrixServer:addRoom(room)
 end
 
 function MatrixServer:msg(room_id, body, msgtype)
+    -- check if there's an outgoing message timer already
+    self:ClearSendTimer()
+
     if not msgtype then
         msgtype = 'm.text'
     end
-    local data = {
-        accept_encoding= 'application/json',
-        transfer= 'application/json',
-        postfields= json.encode({
-            msgtype= msgtype,
-            body= body,
-    })}
 
-    http(('/rooms/%s/send/m.room.message?access_token=%s')
-        :format(urllib.quote(room_id), urllib.quote(self.access_token)), data, 'http_cb')
+    if not OUT[room_id] then
+        OUT[room_id] = {}
+    end
+    -- Add message to outgoing queue of messages for this room
+    table.insert(OUT[room_id], {msgtype, body})
+
+    self:StartSendTimer()
+end
+
+function MatrixServer:StartSendTimer()
+    local send_delay = 200
+    self.sendtimer = w.hook_timer(send_delay, 0, 1, "send", "")
+end
+
+function MatrixServer:ClearSendTimer()
+    -- Clear timer if it exists
+    if self.sendtimer then
+        w.unhook(self.sendtimer)
+    end
+    self.sendtimer = nil
+end
+
+function send(data, calls)
+    SERVER:ClearSendTimer()
+    -- Iterate rooms
+    for id, msgs in pairs(OUT) do
+        -- Clear message
+        OUT[id] = nil
+        local body = {}
+        local msgtype
+
+        for _, msg in pairs(msgs) do
+            -- last msgtype will override any other for simplicity's sake
+            msgtype = msg[1]
+            table.insert(body, msg[2])
+        end
+
+        local data = {
+            accept_encoding = 'application/json',
+            transfer = 'application/json',
+            postfields= json.encode({
+                msgtype = msgtype,
+                body = table.concat(body, '\n')
+        })}
+
+        http(('/rooms/%s/send/m.room.message?access_token=%s')
+            :format(
+              urllib.quote(id),
+              urllib.quote(SERVER.access_token)
+            ),
+              data,
+              'http_cb'
+            )
+    end
 end
 
 function MatrixServer:emote(room_id, body)
@@ -548,7 +596,6 @@ function Room:addNick(obj, displayname)
             if buffer_name:match('^!(.-):(.-)%.(.-)$') then
                 for id, name in pairs(self.users) do
                     if id ~= SERVER.user_id then
-                        dbg('Setting new name:' .. name)
                         w.buffer_set(self.buffer, "short_name", name)
                         w.buffer_set(self.buffer, "name", name)
                         w.buffer_set(self.buffer, "full_name",
