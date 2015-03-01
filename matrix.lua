@@ -304,6 +304,8 @@ function http_cb(data, command, rc, stdout, stderr)
             -- We store room_id in data
             local room_id = data
             SERVER:delRoom(room_id)
+        elseif command:find'/typing/' then
+            -- either it errs or it is empty
         elseif command:find'/state/' then
             -- TODO errorcode: M_FORBIDDEN
             dbg({state= js})
@@ -330,6 +332,7 @@ MatrixServer.create = function()
      server.connected = false
      server.rooms = {}
      server.end_token = 'END'
+     server.typing_time = os.clock()
      -- Timer used in cased of errors to restart the polling cycle
      -- During normal operation the polling should re-invoke itself
      server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
@@ -560,6 +563,22 @@ function MatrixServer:state(room_id, key, data)
         }, 'http_cb')
 end
 
+function MatrixServer:SendTypingNotice(room_id)
+    local data = {
+        typing = true,
+        timeout = 4*1000
+    }
+    http(('/rooms/%s/typing/%s?access_token=%s')
+        :format(urllib.quote(room_id),
+          urllib.quote(self.user_id),
+          urllib.quote(self.access_token)),
+        {customrequest = 'PUT',
+         accept_encoding = 'application/json',
+         transfer = 'application/json',
+         postfields= json.encode(data),
+        }, 'http_cb')
+end
+
 
 function buffer_input_cb(b, buffer, data)
     for r_id, room in pairs(SERVER.rooms) do
@@ -609,6 +628,10 @@ end
 
 function Room:emote(msg)
     SERVER:emote(self.identifier, msg)
+end
+
+function Room:SendTypingNotice()
+    SERVER:SendTypingNotice(self.identifier)
 end
 
 function Room:create_buffer()
@@ -732,6 +755,10 @@ function Room:parseChunk(chunk, backlog)
         end
         if content['msgtype'] == 'm.text' then
             body = content['body']
+            -- TODO
+            -- Parse HTML here:
+            -- content.format = 'org.matrix.custom.html'
+            -- fontent.formatted_body...
         elseif content['msgtype'] == 'm.image' then
             local url = content['url']:gsub('mxc://',
                 w.config_get_plugin('homeserver_url')
@@ -881,7 +908,7 @@ function emote_command_cb(data, current_buffer, args)
 end
 
 function topic_command_cb(data, current_buffer, args)
-   local  room = SERVER:findRoom(current_buffer)
+    local room = SERVER:findRoom(current_buffer)
     if room then
         local _, args = split_args(args)
         room:topic(args)
@@ -894,6 +921,28 @@ end
 
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
+    return w.WEECHAT_RC_OK
+end
+
+function typing_notification_cb(signal, sig_type, data)
+    -- Ignore commands
+    if data:match'^/' then
+        return w.WEECHAT_RC_OK
+    end
+    -- Is this signal coming from a matrix buffer?
+    local room = SERVER:findRoom(data)
+    if room then
+        -- Start sending when it reaches > 4
+        if #w.buffer_get_string(data, "input") > 4 then
+            local now = os.time()
+            -- Generate typing events every 4th second
+            if SERVER.typing_time + 4 < now then
+                SERVER.typing_time = now
+                room:SendTypingNotice()
+            end
+        end
+    end
+
     return w.WEECHAT_RC_OK
 end
 
@@ -924,8 +973,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/leave', 'part_command_cb', '')
     w.hook_command_run('/me', 'emote_command_cb', '')
     w.hook_command_run('/topic', 'topic_command_cb', '')
-    -- Such elegance, much woe.
-    --cmds = {k[8:]: v for k, v in globals().items() if k.startswith("command_")}
+    w.hook_signal('input_text_changed', "typing_notification_cb", '')
     local cmds = {'help', 'connect', 'join', 'part'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
         '[command] [command options]',
