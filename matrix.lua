@@ -266,6 +266,9 @@ function http_cb(data, command, rc, stdout, stderr)
             SERVER:initial_sync()
         elseif command:find'/rooms/.*/initialSync' then
             local myroom = SERVER:addRoom(js)
+            for _, chunk in pairs(js['presence']) do
+                myroom:parseChunk(chunk, true)
+            end
             for _, chunk in pairs(js['messages']['chunk']) do
                 myroom:parseChunk(chunk, true)
             end
@@ -278,14 +281,14 @@ function http_cb(data, command, rc, stdout, stderr)
             end
             SERVER:poll()
         elseif command:find'messages' then
-            dbg(js)
+            dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
             -- We came from a join command, fecth some messages
             local found = false
             for id, _ in pairs(SERVER.rooms) do
                 if id == js.room_id then
                     found = true
-                    w.print(BUFFER, 'error\tNot joining room, already in it.')
+                    w.print(BUFFER, 'error\tJoined room, but already in it.')
                     break
                 end
             end
@@ -303,13 +306,12 @@ function http_cb(data, command, rc, stdout, stderr)
             SERVER:delRoom(room_id)
         elseif command:find'/state/' then
             -- TODO errorcode: M_FORBIDDEN
-            dbg(js)
+            dbg({state= js})
         elseif command:find'/send/' then
             -- XXX Errorhandling 
         else
-            w.print('', 'Uknown command in http cb')
-            dbg(command)
-            dbg(js)
+            dbg({['error'] = 'Unknown command in http cb', command=command,
+                js=js})
         end
     end
 
@@ -446,7 +448,7 @@ end
 function MatrixServer:delRoom(room_id)
     for id, room in pairs(self.rooms) do
         if id == room_id then
-            w.print(BUFFER, '\tLeaving room '..room.server..':'..room.name)
+            w.print(BUFFER, '\tLeaving room '..room.name..':'..room.server)
             room:destroy()
             self.rooms[id] = nil
             break
@@ -589,7 +591,6 @@ Room.create = function(obj)
     room.visibility = obj.visibility
     if not obj['visibility'] then
         room.visibility = 'public'
-        dbg(obj)
     end
     -- Cache lines for dedup?
     room.lines = {}
@@ -697,7 +698,7 @@ function Room:parseChunk(chunk, backlog)
     end
 
     if backlog then
-        tags = "notify_none,no_higlight,no_log,logger_backlog_end"
+        tags = "notify_none,no_higlight,no_log"
     end
 
     local is_self = false
@@ -707,7 +708,9 @@ function Room:parseChunk(chunk, backlog)
     end
 
     if chunk['type'] == 'm.room.message' then
-        tags = tags .. ",notify_message"
+        if not backlog then
+            tags = tags .. ",notify_message"
+        end
 
 
         --local time_int = os.time()-chunk['age']/1000
@@ -804,8 +807,13 @@ function Room:parseChunk(chunk, backlog)
             local nick = chunk['prev_content'].displayname
             if not nick then
                 nick = chunk['user_id']
+            end
             if self.users[chunk['user_id']] then
                 self.users[chunk['user_id']] = nil
+            end
+            tags = "irc_quit"
+            if backlog then
+                tags = tags .. ',notify_none,no_highlight,no_log'
             end
             --TODO delnick w.nicklist_add_nick(self.buffer, self.nicklist_group,
             --    nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
@@ -818,10 +826,9 @@ function Room:parseChunk(chunk, backlog)
                 nick,
                 wcolor('irc.color.message_quit')
             )
-            w.print_date_tags(self.buffer, time_int, "irc_quit",
+            w.print_date_tags(self.buffer, time_int, tags,
                 data)
         end
-    end
     elseif chunk['type'] == 'm.room.create' then
         -- TODO: parse create events --
     elseif chunk['type'] == 'm.room.power_levels' then
@@ -830,8 +837,10 @@ function Room:parseChunk(chunk, backlog)
         -- TODO: parse join_rules events --
     elseif chunk['type'] == 'm.typing' then
         -- TODO: Typing notices. --
+    elseif chunk['type'] == 'm.presence' then
+        self:addNick(chunk.content, chunk['content']['displayname'])
     else
-        dbg(chunk)
+        dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
     end
 end
 
