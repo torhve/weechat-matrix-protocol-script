@@ -967,6 +967,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         user= {'', 'Your homeserver username'},
         password= {'', 'Your homeserver password'},
         backlog_lines= {'20', 'Number of lines to fetch from backlog upon connecting'},
+        typing_notices = {'on', 'Send typing notices when you type'},
     }
     -- set default settings
     local version = w.info_get('version_number', '') or 0
@@ -987,7 +988,9 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/leave', 'part_command_cb', '')
     w.hook_command_run('/me', 'emote_command_cb', '')
     w.hook_command_run('/topic', 'topic_command_cb', '')
-    w.hook_signal('input_text_changed', "typing_notification_cb", '')
+    if w.config_get_plugin('typing_notices') == 'on' then
+        w.hook_signal('input_text_changed', "typing_notification_cb", '')
+    end
     local cmds = {'help', 'connect', 'join', 'part'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
         '[command] [command options]',
