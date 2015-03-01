@@ -662,6 +662,34 @@ function Room:destroy()
     w.buffer_close(self.buffer)
 end
 
+function Room:_nickListChanged()
+    -- Check the user count, if it's 2 or less then we decide this buffer
+    -- is a "private" one like IRC's query type
+    if self.member_count == 3 then -- don't run code for every add > 2
+        w.buffer_set(self.buffer, "localvar_set_type", 'channel')
+    elseif self.member_count == 2 then
+        -- At the point where we reach two nicks, set the buffer name to be
+        -- the display name of the other guy that is not our self since it's
+        -- in effect a query, but the matrix protocol doesn't have such
+        -- a concept
+        w.buffer_set(self.buffer, "localvar_set_type", 'private')
+        w.buffer_set(self.buffer, "localvar_set_server", self.server)
+        -- Check if the room name is identifier meaning we don't have a
+        -- name set yet, and should try and set one
+        local buffer_name = w.buffer_get_string(self.buffer, 'name')
+        if buffer_name:match('^!(.-):(.-)%.(.-)$') then
+            for id, name in pairs(self.users) do
+                if id ~= SERVER.user_id then
+                    w.buffer_set(self.buffer, "short_name", name)
+                    w.buffer_set(self.buffer, "name", name)
+                    w.buffer_set(self.buffer, "full_name",
+                    self.server.."."..name)
+                end
+            end
+        end
+    end
+end
+
 function Room:addNick(obj, displayname)
     if not displayname then
         displayname = obj.user_id:match('@(.+):(.+)')
@@ -682,35 +710,25 @@ function Room:addNick(obj, displayname)
             self.nicklist_group,
             displayname,
             nick_c, '', '', 1)
+        self:_nickListChanged()
 
-        -- Check the user count, if it's 2 or less then we decide this buffer
-        -- is a "private" one like IRC's query type
-        if self.member_count == 3 then -- don't run code for every add > 2
-            w.buffer_set(self.buffer, "localvar_set_type", 'channel')
-        elseif self.member_count == 2 then
-            -- At the point where we reach two nicks, set the buffer name to be
-            -- the display name of the other guy that is not our self since it's
-            -- in effect a query, but the matrix protocol doesn't have such
-            -- a concept
-            w.buffer_set(self.buffer, "localvar_set_type", 'private')
-            w.buffer_set(self.buffer, "localvar_set_server", self.server)
-            -- Check if the room name is identifier meaning we don't have a
-            -- name set yet, and should try and set one
-            local buffer_name = w.buffer_get_string(self.buffer, 'name')
-            if buffer_name:match('^!(.-):(.-)%.(.-)$') then
-                for id, name in pairs(self.users) do
-                    if id ~= SERVER.user_id then
-                        w.buffer_set(self.buffer, "short_name", name)
-                        w.buffer_set(self.buffer, "name", name)
-                        w.buffer_set(self.buffer, "full_name",
-                        self.server.."."..name)
-                    end
-                end
-            end
-        end
     end
 
     return displayname
+end
+
+function Room:delNick(id)
+    if self.users[id] then
+        self.users[id] = nil
+        local nick_ptr = w.nicklist_search_nick(self.buffer, self.nicklist_group)
+        if nick_ptr then
+            w.nicklist_remove_nick(self.buffer,
+                self.nicklist_group,
+                nick_ptr)
+        end
+        self:_nickListChanged()
+        return true
+    end
 end
 
 function Room:parseChunk(chunk, backlog)
@@ -830,20 +848,16 @@ function Room:parseChunk(chunk, backlog)
             )
             w.print_date_tags(self.buffer, time_int, tags, data)
         elseif chunk['content']['membership'] == 'leave' then
-            --## TODO delnick logic
             local nick = chunk['prev_content'].displayname
             if not nick then
                 nick = chunk['user_id']
             end
-            if self.users[chunk['user_id']] then
-                self.users[chunk['user_id']] = nil
-            end
             tags = "irc_quit"
             if backlog then
                 tags = tags .. ',notify_none,no_highlight,no_log'
+            else
+                self:delNick(nick)
             end
-            --TODO delnick w.nicklist_add_nick(self.buffer, self.nicklist_group,
-            --    nick, w.info_get('irc_nick_color_name', nick), '', '', 1)
             --local time_int = os.time()-chunk['age']/1000
             local time_int = chunk['origin_server_ts']/1000
             local data = ('%s%s\t%s%s%s left the room.'):format(
