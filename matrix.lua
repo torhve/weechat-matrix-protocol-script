@@ -317,7 +317,7 @@ function http_cb(data, command, rc, stdout, stderr)
                 js=js})
         end
     end
-    if tonumber(rc) < 0 then
+    if tonumber(rc) == -2 then
         w.print('', 'matrix: Call to API errored, maybe timeout?')
     end
 
