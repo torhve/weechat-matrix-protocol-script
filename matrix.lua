@@ -205,9 +205,10 @@ function poll_cb(data, command, rc, stdout, stderr)
     if tonumber(rc) >= 0 then
         stdout = table.concat(STDOUT[command])
         STDOUT[command] = nil
-        local js = json.decode(stdout)
-        if false then --- pcall
-            w.print('', ('%s Error: %s during json load: %s'):format(SCRIPT_NAME, e, stdout))
+        -- Protected call in case of JSON errors
+        local success, js = pcall(json.decode, stdout)
+        if not success then --- pcall
+            w.print('', ('%s Error: %s during json load: %s'):format(SCRIPT_NAME, js, stdout))
             js = {}
         end
         if js['errcode'] then
@@ -457,7 +458,6 @@ function MatrixServer:delRoom(room_id)
             break
         end
     end
-    return myroom
 end
 
 function MatrixServer:msg(room_id, body, msgtype)
@@ -641,7 +641,7 @@ function Room:create_buffer()
     else
         self.buffer = w.buffer_new(("%s.%s")
             :format(self.server, self.name), "buffer_input_cb",
-            self.name, "", "")
+            self.name, "closed_matrix_room_cb", "")
         -- Defined in weechat's irc-nick.h
         self.nicklist_group = w.nicklist_add_group(self.buffer,
                 '', "999|...", "weechat.color.nicklist_group", 1)
@@ -936,6 +936,10 @@ end
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
+end
+
+function closed_matrix_room_cb(data, buffer)
+    return w.WEECHAT_RC_ERR
 end
 
 function typing_notification_cb(signal, sig_type, data)
