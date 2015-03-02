@@ -317,6 +317,9 @@ function http_cb(data, command, rc, stdout, stderr)
                 js=js})
         end
     end
+    if tonumber(rc) < 0 then
+        w.print('', 'matrix: Call to API errored, maybe timeout?')
+    end
 
     return w.WEECHAT_RC_OK
 end
@@ -368,13 +371,14 @@ function MatrixServer:connect()
         end
 
         self.connecting = true
-        w.print('', 'Connecting to homeserver.')
+        w.print('', 'matrix: Connecting to homeserver URL: '..w.config_get_plugin('homeserver_url'))
         local post = {
             ["type"]="m.login.password",
             ["user"]=user,
             ["password"]=password
         }
-        http('/login', self:_getPost(post), 'http_cb')
+        -- Set a short timeout so user can get more immidiate feedback
+        http('/login', self:_getPost(post), 'http_cb', 5*1000)
     end
 end
 
