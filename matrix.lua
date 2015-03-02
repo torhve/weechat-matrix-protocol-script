@@ -622,6 +622,15 @@ Room.create = function(obj)
     return room
 end
 
+function Room:setName(name)
+    w.buffer_set(self.buffer, "short_name", self.name)
+    w.buffer_set(self.buffer, "name", self.name)
+    -- Doesn't work
+    --w.buffer_set(self.buffer, "plugin", "matrix")
+    w.buffer_set(self.buffer, "full_name",
+        self.server.."."..self.name)
+end
+
 function Room:topic(topic)
     SERVER:state(self.identifier, 'm.room.topic', {topic=topic})
 end
@@ -652,14 +661,8 @@ function Room:create_buffer()
     end
     w.buffer_set(self.buffer, "nicklist", "1")
     w.buffer_set(self.buffer, "nicklist_display_groups", "0")
-    -- TODO maybe use servername of homeserver?
     w.buffer_set(self.buffer, "localvar_set_server", self.server)
-    w.buffer_set(self.buffer, "short_name", self.name)
-    w.buffer_set(self.buffer, "name", self.name)
-    -- Doesn't work
-    --w.buffer_set(self.buffer, "plugin", "matrix")
-    w.buffer_set(self.buffer, "full_name",
-        self.server.."."..self.name)
+    self:setName(self.name)
 end
 
 function Room:destroy()
@@ -884,6 +887,9 @@ function Room:parseChunk(chunk, backlog)
         -- TODO: Typing notices. --
     elseif chunk['type'] == 'm.presence' then
         self:addNick(chunk.content, chunk['content']['displayname'])
+    elseif chunk['type'] == 'm.room.aliases' then
+        -- Use first alias, weechat doesn't really support multiple  aliases
+        self:setName(chunk.content.aliases[1])
     else
         dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
     end
