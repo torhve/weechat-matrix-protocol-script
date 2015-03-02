@@ -19,7 +19,6 @@ local SCRIPT_LICENSE = "MIT"
 local SCRIPT_DESC = "Matrix.org chat plugin"
 local SCRIPT_COMMAND = SCRIPT_NAME
 
-local CONF = {}
 local SERVER
 local STDOUT = {}
 local OUT = {}
@@ -987,11 +986,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- set default settings
     local version = w.info_get('version_number', '') or 0
     for option, value in pairs(settings) do
-        if w.config_is_set_plugin(option) == 1 then
-            CONF[option] = w.config_get_plugin(option)
-        else
+        if w.config_is_set_plugin(option) ~= 1 then
             w.config_set_plugin(option, value[1])
-            CONF[option] = value[1]
         end
         if tonumber(version) >= 0x00030500 then
             w.config_set_desc_plugin(option, ('%s (default: "%s")'):format(
