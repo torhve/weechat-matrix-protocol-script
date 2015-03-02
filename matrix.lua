@@ -275,8 +275,12 @@ function http_cb(data, command, rc, stdout, stderr)
         elseif command:find'initialSync' then
             for _, room in pairs(js['rooms']) do
                 local myroom = SERVER:addRoom(room)
-                for _, chunk in pairs(room['messages']['chunk']) do
-                    myroom:parseChunk(chunk, true)
+                local messages = room.messages
+                if messages then
+                    local chunks = messages.chunk or {}
+                    for _, chunk in pairs(chunks) do
+                        myroom:parseChunk(chunk, true)
+                    end
                 end
             end
             SERVER:poll()
@@ -602,7 +606,12 @@ Room.create = function(obj)
     room.identifier = obj['room_id']
     room.server = 'matrix'
     room.member_count = 0
-    for _, state in pairs(obj['state']) do
+    -- We might not be a member yet
+    local state_events = obj.state or {}
+    if #state_events == 0 then
+        dbg(obj)
+    end
+    for _, state in pairs(state_events) do
         if state['type'] == 'm.room.aliases' then
             local name = state['content']['aliases'][1]
             room.name, room.server = name:match('(.+):(.+)')
@@ -615,6 +624,15 @@ Room.create = function(obj)
     if not obj['visibility'] then
         room.visibility = 'public'
     end
+
+    if obj.membership == 'invite' then
+        if w.config_get_plugin('autojoin_on_invite') == 'on' then
+            SERVER:join(room.identifier)
+        else
+            mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.identifier, obj.inviter, room.identifier))
+        end
+    end
+
     -- Cache lines for dedup?
     room.lines = {}
     -- Cache users for presence/nicklist
@@ -876,6 +894,10 @@ function Room:parseChunk(chunk, backlog)
             )
             w.print_date_tags(self.buffer, time_int, tags,
                 data)
+        elseif chunk['content']['membership'] == 'invite' then
+            mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(self.identifier, chunk.creator, self.identifier))
+        else
+            dbg({err= 'unknown membership type in parseChunk', chunk= chunk})
         end
     elseif chunk['type'] == 'm.room.create' then
         -- TODO: parse create events --
@@ -981,6 +1003,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         user= {'', 'Your homeserver username'},
         password= {'', 'Your homeserver password'},
         backlog_lines= {'20', 'Number of lines to fetch from backlog upon connecting'},
+        autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
     }
     -- set default settings
@@ -999,6 +1022,11 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/leave', 'part_command_cb', '')
     w.hook_command_run('/me', 'emote_command_cb', '')
     w.hook_command_run('/topic', 'topic_command_cb', '')
+    -- TODO
+    -- /invite
+    -- /create
+    -- /list
+    -- /whois
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
