@@ -30,19 +30,20 @@ local MatrixServer
 local default_color = w.color('default')
 
 
-local function tprint (tbl, indent, out)
+local function tprint(tbl, indent, buffer)
+    if not buffer then buffer = '' end
     if not indent then indent = 0 end
     for k, v in pairs(tbl) do
         local formatting = string.rep("  ", indent) .. k .. ": "
         if type(v) == "table" then
-            w.print('', formatting)
-            tprint(v, indent+1)
+            w.print(buffer, formatting)
+            tprint(v, indent+1, buffer)
         elseif type(v) == 'boolean' then
-            w.print('', formatting .. tostring(v))
+            w.print(buffer, formatting .. tostring(v))
         elseif type(v) == 'userdata' then
-            w.print('', formatting .. tostring(v))
+            w.print(buffer, formatting .. tostring(v))
         else
-            w.print('', formatting .. v)
+            w.print(buffer, formatting .. v)
         end
     end
 end
@@ -53,6 +54,17 @@ local function dbg(message)
     else
         message = ("DEBUG: %s"):format(tostring(message))
         w.print("", message)
+    end
+end
+
+local function mprint(message)
+    -- Print message to matrix buffer
+    if type(message) == 'table' then
+        tprint(message, BUFFER)
+    else
+        message = tostring(message)
+        -- TODO prnt date tags
+        w.print(BUFFER, message)
     end
 end
 
@@ -191,7 +203,7 @@ end
 
 function poll_cb(data, command, rc, stdout, stderr)
     if stderr ~= '' then
-        w.print('', ('%s: %s'):format(SCRIPT_NAME, stderr))
+        mprint(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
     end
 
@@ -207,12 +219,12 @@ function poll_cb(data, command, rc, stdout, stderr)
         STDOUT[command] = nil
         -- Protected call in case of JSON errors
         local success, js = pcall(json.decode, stdout)
-        if not success then --- pcall
-            w.print('', ('%s Error: %s during json load: %s'):format(SCRIPT_NAME, js, stdout))
+        if not success then
+            mprint(('error\t%s during json load: %s'):format(js, stdout))
             js = {}
         end
         if js['errcode'] then
-            w.print('', ('%s: %s'):format(SCRIPT_NAME, js['errcode']))
+            mprint(js)
         else
             SERVER.end_token = js['end']
             for _, chunk in pairs(js.chunk) do
@@ -239,7 +251,7 @@ end
 function http_cb(data, command, rc, stdout, stderr)
 
     if stderr ~= '' then
-        w.print('', ('%s: %s'):format(SCRIPT_NAME, stderr))
+        mprint(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
     end
 
@@ -253,9 +265,18 @@ function http_cb(data, command, rc, stdout, stderr)
     if tonumber(rc) >= 0 then
         stdout = table.concat(STDOUT[command])
         STDOUT[command] = nil
-        local js = json.decode(stdout)
+        -- Protected call in case of JSON errors
+        local success, js = pcall(json.decode, stdout)
+        if not success then
+            mprint(('error\t%s during json load: %s'):format(js, stdout))
+            js = {}
+        end
         if js['errcode'] then
-            w.print(BUFFER, ('error\t%s'):format(js['error']))
+            if command:find'login' then
+                w.print('', ('matrix: Error code during login: %s'):format(js['errcode']))
+            else
+                mprint(js)
+            end
             return w.WEECHAT_RC_OK
         end
         -- Get correct handler
@@ -289,7 +310,7 @@ function http_cb(data, command, rc, stdout, stderr)
             for id, _ in pairs(SERVER.rooms) do
                 if id == js.room_id then
                     found = true
-                    w.print(BUFFER, 'error\tJoined room, but already in it.')
+                    mprint('error\tJoined room, but already in it.')
                     break
                 end
             end
@@ -318,7 +339,7 @@ function http_cb(data, command, rc, stdout, stderr)
         end
     end
     if tonumber(rc) == -2 then
-        w.print('', 'matrix: Call to API errored, maybe timeout?')
+        mprint(('matrix: Call to API errored in command %s, maybe timeout?'):format(command))
     end
 
     return w.WEECHAT_RC_OK
@@ -412,7 +433,7 @@ function MatrixServer:join(room)
         return
     end
 
-    w.print(BUFFER, '\tJoining room '..room)
+    mprint('\tJoining room '..room)
     room = urllib.quote(room)
     http('/join/' .. room,
         {postfields= "access_token="..self.access_token}, 'http_cb')
@@ -456,7 +477,7 @@ end
 function MatrixServer:delRoom(room_id)
     for id, room in pairs(self.rooms) do
         if id == room_id then
-            w.print(BUFFER, '\tLeaving room '..room.name..':'..room.server)
+            mprint(BUFFER, '\tLeaving room '..room.name..':'..room.server)
             room:destroy()
             self.rooms[id] = nil
             break
