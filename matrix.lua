@@ -30,23 +30,34 @@ local MatrixServer
 local default_color = w.color('default')
 
 
-local function tprint(tbl, indent, buffer)
-    if not buffer then buffer = '' end
+local function tprint(tbl, indent, out)
     if not indent then indent = 0 end
     for k, v in pairs(tbl) do
         local formatting = string.rep("  ", indent) .. k .. ": "
         if type(v) == "table" then
-            w.print(buffer, formatting)
-            tprint(v, indent+1, buffer)
+            w.print(BUFFER, formatting)
+            tprint(v, indent+1)
         elseif type(v) == 'boolean' then
-            w.print(buffer, formatting .. tostring(v))
+            w.print(BUFFER, formatting .. tostring(v))
         elseif type(v) == 'userdata' then
-            w.print(buffer, formatting .. tostring(v))
+            w.print(BUFFER, formatting .. tostring(v))
         else
-            w.print(buffer, formatting .. v)
+            w.print(BUFFER, formatting .. v)
         end
     end
 end
+
+local function mprint(message)
+    -- Print message to matrix buffer
+    if type(message) == 'table' then
+        tprint(message)
+    else
+        message = tostring(message)
+        -- TODO prnt date tags
+        w.print(BUFFER, message)
+    end
+end
+
 local function dbg(message)
     if type(message) == 'table' then
         w.print("", 'Printing table: ' .. tostring(message))
@@ -54,17 +65,6 @@ local function dbg(message)
     else
         message = ("DEBUG: %s"):format(tostring(message))
         w.print("", message)
-    end
-end
-
-local function mprint(message)
-    -- Print message to matrix buffer
-    if type(message) == 'table' then
-        tprint(message, BUFFER)
-    else
-        message = tostring(message)
-        -- TODO prnt date tags
-        w.print(BUFFER, message)
     end
 end
 
@@ -95,29 +95,9 @@ urllib.urlencode = function(tbl)
     return table.concat(out, '&')
 end
 
-local function split(str, delim)
-    if not delim then delim = ' ' end
-    if str == "" or str == nil then
-        return { }
-    end
-    str = str .. delim
-    local _accum_0 = { }
-    local _len_0 = 1
-    for m in str:gmatch("(.-)" .. delim) do
-        _accum_0[_len_0] = m
-        _len_0 = _len_0 + 1
-    end
-    return _accum_0
-end
-
 local function split_args(args)
-    local splits = split(args)
-    local command = splits[1]
-    local remainder = {}
-    for i=2,#splits do
-        table.insert(remainder, splits[i])
-    end
-    return command, table.concat(remainder, ' ')
+    local function_name, arg = args:match('^(.-) (.*)$')
+    return function_name, arg
 end
 
 function unload()
@@ -249,7 +229,6 @@ end
 
 
 function http_cb(data, command, rc, stdout, stderr)
-
     if stderr ~= '' then
         mprint(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
@@ -330,7 +309,8 @@ function http_cb(data, command, rc, stdout, stderr)
             -- either it errs or it is empty
         elseif command:find'/state/' then
             -- TODO errorcode: M_FORBIDDEN
-            dbg({state= js})
+            -- either it errs or it is empty
+            --dbg({state= js})
         elseif command:find'/send/' then
             -- XXX Errorhandling 
         else
