@@ -52,7 +52,6 @@ local function mprint(message)
         tprint(message)
     else
         message = tostring(message)
-        -- TODO prnt date tags
         w.print(BUFFER, message)
     end
 end
@@ -312,6 +311,13 @@ function http_cb(data, command, rc, stdout, stderr)
             -- We store room_id in data
             local room_id = data
             SERVER:delRoom(room_id)
+        elseif command:find'upload' then
+            -- We store room_id in data
+            local room_id = data
+            dbg(js)
+            if js.content_uri then
+                SERVER:msg(room_id, js.content_uri)
+            end
         elseif command:find'/typing/' then
             -- either it errs or it is empty
         elseif command:find'/state/' then
@@ -591,6 +597,40 @@ function MatrixServer:SendTypingNotice(room_id)
         }, 'http_cb')
 end
 
+function upload_cb(data, command, rc, stdout, stderr)
+    if stderr ~= '' then
+        mprint(('error: %s'):format(stderr))
+        return w.WEECHAT_RC_OK
+    end
+
+    if stdout ~= '' then
+        if not STDOUT[command] then
+            STDOUT[command] = {}
+        end
+        table.insert(STDOUT[command], stdout)
+    end
+
+    if tonumber(rc) >= 0 then
+        stdout = table.concat(STDOUT[command])
+        STDOUT[command] = nil
+        --- TODO improve content type detection, maybe let curl do it?
+    end
+end
+
+function MatrixServer:upload(room_id, filename)
+    local content_type = 'image/jpeg'
+    if command:find'png' then
+        content_type = 'image/png'
+    end
+    -- TODO:
+    --local url = w.config_get_plugin('homeserver_url') ..
+    --    ('_matrix/media/v1/upload?access_token=%s')
+    --    :format( urllib.quote(SERVER.access_token) )
+    --w.hook_process_hashtable('curl',
+    --    {arg1 = '-F',
+    --    arg2 = 'filedata=@'..filename
+    --    }, 30*1000, 'upload_cb', room_id)
+end
 
 function buffer_input_cb(b, buffer, data)
     for r_id, room in pairs(SERVER.rooms) do
@@ -644,7 +684,7 @@ end
 
 function Room:setName(name)
     w.buffer_set(self.buffer, "short_name", self.name)
-    w.buffer_set(self.buffer, "name", self.name)
+    w.buffer_set(self.buffer, "name", self.server.."."..self.name)
     -- Doesn't work
     --w.buffer_set(self.buffer, "plugin", "matrix")
     w.buffer_set(self.buffer, "full_name",
@@ -653,6 +693,10 @@ end
 
 function Room:topic(topic)
     SERVER:state(self.identifier, 'm.room.topic', {topic=topic})
+end
+
+function Room:upload(filename)
+    SERVER:upload(self.identifier, filename)
 end
 
 function Room:msg(msg)
@@ -758,44 +802,61 @@ function Room:delNick(id)
     end
 end
 
+-- Parses a chunk of json meant for a room
 function Room:parseChunk(chunk, backlog)
-    local tags = ''
-    -- Parses a chunk of json meant for a room 
+    local taglist = {}
+    local tag = function(tag)
+        -- Helper function to add tags
+        if type(tag) == 'table' then
+            for _, t in pairs(tag) do
+                taglist[t] = true
+            end
+        else
+            taglist[tag] = true
+        end
+    end
+    local tags = function()
+        -- Helper for returning taglist for this message
+        local out = {}
+        for k, v in pairs(taglist) do
+            table.insert(out, k)
+        end
+        local tagstring = table.concat(out, ',')
+        return tagstring
+    end
     if not backlog then
         backlog = false
     end
 
     if backlog then
-        tags = "notify_none,no_higlight,no_log"
+        tag({'no_highlight','notify_none','no_log'})
     end
 
     local is_self = false
     -- Check if own message
     if chunk.user_id == SERVER.user_id then
         is_self = true
+        tag{'no_highlight','notify_none'}
     end
 
     if chunk['type'] == 'm.room.message' then
-        if not backlog then
-            tags = tags .. ",notify_message"
+        if not backlog and not is_self then
+            tag'notify_message'
         end
 
-
-        --local time_int = os.time()-chunk['age']/1000
         local time_int = chunk['origin_server_ts']/1000
         local color = default_color
         local nick_c
         local body
         local nick = self:addNick(chunk.user_id)
         if is_self then
-            tags = tags .. ",no_highlight"
             nick_c = w.color('chat_nick_self')
         else
             nick_c = w.info_get('irc_nick_color', nick)
         end
         local content = chunk['content']
         if not content['msgtype'] then
-            -- We don't support redactions 
+            -- We don't support redactions
             return
         end
         if content['msgtype'] == 'm.text' then
@@ -810,17 +871,11 @@ function Room:parseChunk(chunk, backlog)
                 .. '_matrix/media/v1/download/')
             body = content['body'] .. ' ' .. url
         elseif content['msgtype'] == 'm.notice' then
-            if is_self then
-                tags = tags .. ",no_highlight"
-            end
             color = wcolor('irc.color.notice')
             body = content['body']
 
         elseif content['msgtype'] == 'm.emote' then
-            tags = tags .. ",irc_action"
-            if is_self then
-                tags = tags .. ",no_highlight"
-            end
+            tag"irc_action"
             local prefix = w.config_string(
                     w.config_get('weechat.look.prefix_action'))
             body = ("%s%s %s%s"):format(
@@ -836,12 +891,9 @@ function Room:parseChunk(chunk, backlog)
                 format_nick(nick, is_self),
                 color,
                 body)
-        w.print_date_tags(self.buffer, time_int, tags,
+        w.print_date_tags(self.buffer, time_int, tags(),
             data)
     elseif chunk['type'] == 'm.room.topic' then
-        if is_self then
-            tags = tags .. ",no_highlight"
-        end
         local title = chunk['content']['topic']
         w.buffer_set(self.buffer, "title", title)
         local color = wcolor("irc.color.topic_new")
@@ -853,14 +905,14 @@ function Room:parseChunk(chunk, backlog)
                 title,
                 default_color
               )
-        w.print_date_tags(self.buffer, chunk.origin_server_ts, tags,
+        w.print_date_tags(self.buffer, chunk.origin_server_ts, tags(),
             data)
     elseif chunk['type'] == 'm.room.name' then
         local name = chunk['content']['name']
         w.buffer_set(self.buffer, "short_name", name)
     elseif chunk['type'] == 'm.room.member' then
         if chunk['content']['membership'] == 'join' then
-            local tags = "irc_join,no_highlight"
+            tag"irc_join"
             local nick = self:addNick(chunk.user_id, chunk.content.displayname)
             local time_int = chunk['origin_server_ts']/1000
             -- Check if the chunk has prev_content or not
@@ -880,7 +932,7 @@ function Room:parseChunk(chunk, backlog)
                     default_color,
                     w.info_get('irc_nick_color', nick),
                     nick)
-                w.print_date_tags(self.buffer, time_int, tags, data)
+                w.print_date_tags(self.buffer, time_int, tags(), data)
             else
                 local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
                     wcolor('weechat.color.chat_prefix_join'),
@@ -892,17 +944,15 @@ function Room:parseChunk(chunk, backlog)
                     chunk.user_id,
                     wcolor('irc.color.message_join')
                 )
-                w.print_date_tags(self.buffer, time_int, tags, data)
+                w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         elseif chunk['content']['membership'] == 'leave' then
             local nick = chunk['prev_content'].displayname
             if not nick then
                 nick = chunk['user_id']
             end
-            tags = "irc_quit"
-            if backlog then
-                tags = tags .. ',notify_none,no_highlight,no_log'
-            else
+            tag"irc_quit"
+            if not backlog then
                 self:delNick(nick)
             end
             local time_int = chunk['origin_server_ts']/1000
@@ -913,7 +963,7 @@ function Room:parseChunk(chunk, backlog)
                 nick,
                 wcolor('irc.color.message_quit')
             )
-            w.print_date_tags(self.buffer, time_int, tags,
+            w.print_date_tags(self.buffer, time_int, tags(),
                 data)
         elseif chunk['content']['membership'] == 'invite' then
             mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(self.identifier, chunk.creator, self.identifier))
@@ -986,6 +1036,17 @@ function topic_command_cb(data, current_buffer, args)
     end
 end
 
+function upload_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:upload(args)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
@@ -1044,6 +1105,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/leave', 'part_command_cb', '')
     w.hook_command_run('/me', 'emote_command_cb', '')
     w.hook_command_run('/topic', 'topic_command_cb', '')
+    w.hook_command_run('/upload', 'upload_command_cb', '')
     -- TODO
     -- /invite
     -- /create
@@ -1051,6 +1113,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- /whois
     -- /nick
     -- /op
+    -- /kick
+    -- /ban
     -- /voice
     -- /deop
     -- /devoice
