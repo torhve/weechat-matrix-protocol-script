@@ -595,6 +595,18 @@ function MatrixServer:state(room_id, key, data)
         }, 'http_cb')
 end
 
+function MatrixServer:set_membership(room_id, userid, data)
+    http(('/rooms/%s/state/m.room.member/%s?access_token=%s')
+        :format(urllib.quote(room_id),
+          urllib.quote(userid),
+          urllib.quote(self.access_token)),
+        {customrequest = 'PUT',
+         accept_encoding = 'application/json',
+         transfer = 'application/json',
+         postfields= json.encode(data),
+        }, 'http_cb')
+end
+
 function MatrixServer:SendTypingNotice(room_id)
     local data = {
         typing = true,
@@ -1048,6 +1060,19 @@ function Room:Op(nick)
     end
 end
 
+function Room:Kick(nick, reason)
+    for id, name in pairs(self.users) do
+        if name == nick then
+            local data = {
+                membership = 'leave',
+                reason = 'Kicked by '..SERVER.user_id
+            }
+            SERVER:set_membership(self.identifier, id, data)
+            break
+        end
+    end
+end
+
 function poll(a,b)
     SERVER:poll()
     return w.WEECHAT_RC_OK
@@ -1143,6 +1168,17 @@ function op_command_cb(data, current_buffer, args)
     end
 end
 
+function kick_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:Kick(args)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1204,13 +1240,12 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/query', 'query_command_cb', '')
     w.hook_command_run('/list', 'list_command_cb', '')
     w.hook_command_run('/op', 'op_command_cb', '')
+    w.hook_command_run('/kick', 'kick_command_cb', '')
     -- TODO
     -- /invite
     -- /create
     -- /whois
     -- /nick
-    -- /op
-    -- /kick
     -- /ban
     -- /voice
     -- /deop
