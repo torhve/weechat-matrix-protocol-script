@@ -329,6 +329,17 @@ function http_cb(data, command, rc, stdout, stderr)
         elseif command:find'createRoom' then
             local room_id = js.room_id
             -- We get join events, so we don't have to do anything
+        elseif command:find'/publicRooms' then
+            mprint 'Public rooms:'
+            mprint '\tName\tUsers\tTopic\tAliases'
+            for _, r in pairs(js.chunk) do
+                local name = ''
+                if r.name ~= json.null then
+                    name = r.name
+                end
+                mprint(('%s %s %s %s')
+                    :format(name, r.num_joined_members, r.topic, table.concat(r.aliases, ', ')))
+            end
         else
             dbg({['error'] = 'Unknown command in http cb', command=command,
                 js=js})
@@ -653,6 +664,14 @@ function MatrixServer:CreateRoom(public, alias, invites)
         {customrequest = 'POST',
          accept_encoding = 'application/json',
          postfields= json.encode(data),
+        }, 'http_cb')
+end
+
+function MatrixServer:ListRooms()
+    http(('/publicRooms?access_token=%s')
+        :format(urllib.quote(self.access_token)),
+        {
+            accept_encoding = 'application/json',
         }, 'http_cb')
 end
 
@@ -1090,6 +1109,16 @@ function query_command_cb(data, current_buffer, args)
     end
 end
 
+function list_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room or current_buffer == BUFFER then
+        SERVER:ListRooms()
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1149,10 +1178,10 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/topic', 'topic_command_cb', '')
     w.hook_command_run('/upload', 'upload_command_cb', '')
     w.hook_command_run('/query', 'query_command_cb', '')
+    w.hook_command_run('/list', 'list_command_cb', '')
     -- TODO
     -- /invite
     -- /create
-    -- /list
     -- /whois
     -- /nick
     -- /op
