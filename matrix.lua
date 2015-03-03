@@ -872,7 +872,6 @@ function Room:parseChunk(chunk, backlog)
                 else
                     self:delNick(oldnick)
                 end
-                dbg(chunk)
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
                 local data = ('%s--\t%s%s%s is now known as %s%s'):format(
                     pcolor,
@@ -883,11 +882,14 @@ function Room:parseChunk(chunk, backlog)
                     nick)
                 w.print_date_tags(self.buffer, time_int, tags, data)
             else
-                local data = ('%s%s\t%s%s%s joined the room.'):format(
+                local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
                     wcolor('weechat.color.chat_prefix_join'),
                     wconf('weechat.look.prefix_join'),
                     w.info_get('irc_nick_color', nick),
                     nick,
+                    wcolor('irc.color.message_join'),
+                    wcolor'weechat.color.chat_host',
+                    chunk.user_id,
                     wcolor('irc.color.message_join')
                 )
                 w.print_date_tags(self.buffer, time_int, tags, data)
@@ -1047,6 +1049,11 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- /create
     -- /list
     -- /whois
+    -- /nick
+    -- /op
+    -- /voice
+    -- /deop
+    -- /devoice
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
