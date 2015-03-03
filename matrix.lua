@@ -1021,8 +1021,10 @@ function Room:parseChunk(chunk, backlog)
         dbg({event='m.room.create',chunk=chunk})
     elseif chunk['type'] == 'm.room.power_levels' then
         -- TODO: parse power lvls events --
+        self.power_levels = chunk.content
     elseif chunk['type'] == 'm.room.join_rules' then
         -- TODO: parse join_rules events --
+        self.join_rules = chunk.content
     elseif chunk['type'] == 'm.typing' then
         -- TODO: Typing notices. --
     elseif chunk['type'] == 'm.presence' then
@@ -1032,6 +1034,17 @@ function Room:parseChunk(chunk, backlog)
         self:setName(chunk.content.aliases[1])
     else
         dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
+    end
+end
+
+function Room:Op(nick)
+    for id, name in pairs(self.users) do
+        if name == nick then
+            -- patch the locally cached power levels
+            self.power_levels.users[id] = 50
+            SERVER:state(self.identifier, 'm.room.power_levels', self.power_levels)
+            break
+        end
     end
 end
 
@@ -1119,6 +1132,17 @@ function list_command_cb(data, current_buffer, args)
     end
 end
 
+function op_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:Op(args)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1179,6 +1203,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/upload', 'upload_command_cb', '')
     w.hook_command_run('/query', 'query_command_cb', '')
     w.hook_command_run('/list', 'list_command_cb', '')
+    w.hook_command_run('/op', 'op_command_cb', '')
     -- TODO
     -- /invite
     -- /create
