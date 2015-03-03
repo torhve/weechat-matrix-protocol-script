@@ -59,11 +59,10 @@ end
 
 local function dbg(message)
     if type(message) == 'table' then
-        w.print("", 'Printing table: ' .. tostring(message))
         tprint(message)
     else
         message = ("DEBUG: %s"):format(tostring(message))
-        w.print("", message)
+        w.print(BUFFER, message)
     end
 end
 
@@ -154,8 +153,7 @@ function command_connect(current_buffer, args)
 end
 
 function matrix_command_cb(data, current_buffer, args)
-    local function_name, arg = args:match('^(.-) (.*)$')
-    if function_name == 'connect' then
+    if args == 'connect' then
         return command_connect(current_buffer, arg)
     end
     --local command = cmds[function_name](current_buffer, args)
@@ -211,6 +209,10 @@ function poll_cb(data, command, rc, stdout, stderr)
                     local room = SERVER.rooms[chunk['room_id']]
                     if room then
                         room:parseChunk(chunk)
+                    else
+                        -- Chunk for non-existing room, maybe we just got 
+                        -- invited, so lets create a room
+                        SERVER:addRoom(chunk)
                     end
                 end
             end
@@ -292,7 +294,9 @@ function http_cb(data, command, rc, stdout, stderr)
             for id, _ in pairs(SERVER.rooms) do
                 if id == js.room_id then
                     found = true
-                    mprint('error\tJoined room, but already in it.')
+                    -- this is a false positive for example when getting
+                    -- invited. need to investigate more
+                    --mprint('error\tJoined room, but already in it.')
                     break
                 end
             end
@@ -608,9 +612,6 @@ Room.create = function(obj)
     room.member_count = 0
     -- We might not be a member yet
     local state_events = obj.state or {}
-    if #state_events == 0 then
-        dbg(obj)
-    end
     for _, state in pairs(state_events) do
         if state['type'] == 'm.room.aliases' then
             local name = state['content']['aliases'][1]
@@ -631,6 +632,7 @@ Room.create = function(obj)
         else
             mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.identifier, obj.inviter, room.identifier))
         end
+        room:addNick(obj.inviter)
     end
 
     -- Cache lines for dedup?
@@ -857,12 +859,10 @@ function Room:parseChunk(chunk, backlog)
         local name = chunk['content']['name']
         w.buffer_set(self.buffer, "short_name", name)
     elseif chunk['type'] == 'm.room.member' then
-        -- TODO presence, leave, invite
         if chunk['content']['membership'] == 'join' then
             local tags = "irc_join,no_highlight"
             local nick = self:addNick(chunk, chunk['content']['displayname'])
 
-            --local time_int = os.time()-chunk['age']/1000
             local time_int = chunk['origin_server_ts']/1000
             local data = ('%s%s\t%s%s%s joined the room.'):format(
                 wcolor('weechat.color.chat_prefix_join'),
@@ -883,7 +883,6 @@ function Room:parseChunk(chunk, backlog)
             else
                 self:delNick(nick)
             end
-            --local time_int = os.time()-chunk['age']/1000
             local time_int = chunk['origin_server_ts']/1000
             local data = ('%s%s\t%s%s%s left the room.'):format(
                 wcolor('weechat.color.chat_prefix_quit'),
@@ -901,6 +900,7 @@ function Room:parseChunk(chunk, backlog)
         end
     elseif chunk['type'] == 'm.room.create' then
         -- TODO: parse create events --
+        dbg({event='m.room.create',chunk=chunk})
     elseif chunk['type'] == 'm.room.power_levels' then
         -- TODO: parse power lvls events --
     elseif chunk['type'] == 'm.room.join_rules' then
