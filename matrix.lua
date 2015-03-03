@@ -326,6 +326,9 @@ function http_cb(data, command, rc, stdout, stderr)
             --dbg({state= js})
         elseif command:find'/send/' then
             -- XXX Errorhandling 
+        elseif command:find'createRoom' then
+            local room_id = js.room_id
+            -- We get join events, so we don't have to do anything
         else
             dbg({['error'] = 'Unknown command in http cb', command=command,
                 js=js})
@@ -630,6 +633,27 @@ function MatrixServer:upload(room_id, filename)
     --    {arg1 = '-F',
     --    arg2 = 'filedata=@'..filename
     --    }, 30*1000, 'upload_cb', room_id)
+end
+
+function MatrixServer:CreateRoom(public, alias, invites)
+    local data = {}
+    if alias then
+        data.room_alias_name = alias
+    end
+    if public then
+        data.visibility = 'public'
+    else
+        data.visibility = 'private'
+    end
+    if invites then
+        data.invite = invites
+    end
+    http(('/createRoom?access_token=%s')
+        :format(urllib.quote(self.access_token)),
+        {customrequest = 'POST',
+         accept_encoding = 'application/json',
+         postfields= json.encode(data),
+        }, 'http_cb')
 end
 
 function buffer_input_cb(b, buffer, data)
@@ -966,7 +990,10 @@ function Room:parseChunk(chunk, backlog)
             w.print_date_tags(self.buffer, time_int, tags(),
                 data)
         elseif chunk['content']['membership'] == 'invite' then
-            mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(self.identifier, chunk.creator, self.identifier))
+            if not is_self then -- Check if we were the one inviting
+                mprint(('You have been invited to join room %s by %s. Type /join %s to join.')
+                    :format(self.identifier, chunk.content.creator, self.identifier))
+            end
         else
             dbg({err= 'unknown membership type in parseChunk', chunk= chunk})
         end
@@ -1047,6 +1074,21 @@ function upload_command_cb(data, current_buffer, args)
     end
 end
 
+function query_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        for id, displayname in pairs(room.users) do
+            if displayname == args then
+                -- Create a new room and invite the guy
+                SERVER:CreateRoom(false, nil, {id})
+                return w.WEECHAT_RC_OK_EAT
+            end
+        end
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
 
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
@@ -1106,6 +1148,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/me', 'emote_command_cb', '')
     w.hook_command_run('/topic', 'topic_command_cb', '')
     w.hook_command_run('/upload', 'upload_command_cb', '')
+    w.hook_command_run('/query', 'query_command_cb', '')
     -- TODO
     -- /invite
     -- /create
