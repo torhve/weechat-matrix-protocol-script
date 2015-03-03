@@ -717,16 +717,16 @@ function Room:_nickListChanged()
     end
 end
 
-function Room:addNick(obj, displayname)
-    if not displayname then
-        displayname = obj.user_id:match('@(.+):(.+)')
+function Room:addNick(user_id, displayname)
+    if not displayname or displayname == json.null then
+        displayname = user_id:match('@(.+):(.+)')
     end
-    if not self.users[obj.user_id] then
-        self.users[obj['user_id']] = displayname
+    if not self.users[user_id] then
+        self.users[user_id] = displayname
         self.member_count = self.member_count + 1
         local nick_c
         -- Check if this is ourselves
-        if obj.user_id == SERVER.user_id then
+        if user_id == SERVER.user_id then
             w.buffer_set(self.buffer, "highlight_words", displayname)
             w.buffer_set(self.buffer, "localvar_set_nick", displayname)
             nick_c = w.color('chat_nick_self')
@@ -786,7 +786,7 @@ function Room:parseChunk(chunk, backlog)
         local color = default_color
         local nick_c
         local body
-        local nick = self:addNick(chunk)
+        local nick = self:addNick(chunk.user_id)
         if is_self then
             tags = tags .. ",no_highlight"
             nick_c = w.color('chat_nick_self')
@@ -861,17 +861,37 @@ function Room:parseChunk(chunk, backlog)
     elseif chunk['type'] == 'm.room.member' then
         if chunk['content']['membership'] == 'join' then
             local tags = "irc_join,no_highlight"
-            local nick = self:addNick(chunk, chunk['content']['displayname'])
-
+            local nick = self:addNick(chunk.user_id, chunk.content.displayname)
             local time_int = chunk['origin_server_ts']/1000
-            local data = ('%s%s\t%s%s%s joined the room.'):format(
-                wcolor('weechat.color.chat_prefix_join'),
-                wconf('weechat.look.prefix_join'),
-                w.info_get('irc_nick_color', nick),
-                nick,
-                wcolor('irc.color.message_join')
-            )
-            w.print_date_tags(self.buffer, time_int, tags, data)
+            -- Check if the chunk has prev_content or not
+            -- if there is prev_content there wasn't a join but a nick change
+            if chunk.prev_content and chunk.prev_content.membership == 'join' then
+                local oldnick = chunk.prev_content.displayname
+                if oldnick == json.null then
+                    oldnick = ''
+                else
+                    self:delNick(oldnick)
+                end
+                dbg(chunk)
+                local pcolor = wcolor'weechat.color.chat_prefix_network'
+                local data = ('%s--\t%s%s%s is now known as %s%s'):format(
+                    pcolor,
+                    w.info_get('irc_nick_color', oldnick),
+                    oldnick,
+                    default_color,
+                    w.info_get('irc_nick_color', nick),
+                    nick)
+                w.print_date_tags(self.buffer, time_int, tags, data)
+            else
+                local data = ('%s%s\t%s%s%s joined the room.'):format(
+                    wcolor('weechat.color.chat_prefix_join'),
+                    wconf('weechat.look.prefix_join'),
+                    w.info_get('irc_nick_color', nick),
+                    nick,
+                    wcolor('irc.color.message_join')
+                )
+                w.print_date_tags(self.buffer, time_int, tags, data)
+            end
         elseif chunk['content']['membership'] == 'leave' then
             local nick = chunk['prev_content'].displayname
             if not nick then
@@ -908,7 +928,7 @@ function Room:parseChunk(chunk, backlog)
     elseif chunk['type'] == 'm.typing' then
         -- TODO: Typing notices. --
     elseif chunk['type'] == 'm.presence' then
-        self:addNick(chunk.content, chunk['content']['displayname'])
+        self:addNick(chunk.content.user_id, chunk['content']['displayname'])
     elseif chunk['type'] == 'm.room.aliases' then
         -- Use first alias, weechat doesn't really support multiple  aliases
         self:setName(chunk.content.aliases[1])
