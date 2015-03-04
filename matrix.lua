@@ -1042,6 +1042,11 @@ function Room:parseChunk(chunk, backlog)
                 if oldnick == json.null then
                     oldnick = ''
                 else
+                    if oldnick == nick then
+                        -- Maybe they changed their avatar or something else
+                        -- that we don't care about
+                        return
+                    end
                     self:delNick(oldnick)
                 end
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
