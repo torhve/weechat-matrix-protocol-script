@@ -323,9 +323,20 @@ function http_cb(data, command, rc, stdout, stderr)
             for _, chunk in pairs(js['messages']['chunk']) do
                 myroom:parseChunk(chunk, true)
             end
-        elseif command:find'initialSync' then
+        elseif command:find'v1/initialSync' then
             for _, room in pairs(js['rooms']) do
                 local myroom = SERVER:addRoom(room)
+
+                -- Parse states before messages so we can add nicks and stuff
+                -- before messages start appearing
+                local states = room.state
+                if states then
+                    local chunks = room.state or {}
+                    for _, chunk in pairs(chunks) do
+                        myroom:parseChunk(chunk, true)
+                    end
+                end
+
                 local messages = room.messages
                 if messages then
                     local chunks = messages.chunk or {}
@@ -997,6 +1008,9 @@ function Room:parseChunk(chunk, backlog)
             data)
     elseif chunk['type'] == 'm.room.topic' then
         local title = chunk['content']['topic']
+        if not title then
+            title = ''
+        end
         w.buffer_set(self.buffer, "title", title)
         local color = wcolor("irc.color.topic_new")
         local nick = self.users[chunk.user_id] or chunk.user_id
@@ -1049,9 +1063,12 @@ function Room:parseChunk(chunk, backlog)
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         elseif chunk['content']['membership'] == 'leave' then
-            local nick = chunk['prev_content'].displayname
-            if not nick then
-                nick = chunk['user_id']
+            local nick = chunk.user_id
+            local prev = chunk['prev_content']
+            if prev then
+                if prev and prev.displayname and prev.displayname ~= json.null then
+                    nick = prev.displayname
+                end
             end
             tag"irc_quit"
             if not backlog then
