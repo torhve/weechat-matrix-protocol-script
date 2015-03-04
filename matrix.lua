@@ -438,7 +438,7 @@ MatrixServer.create = function()
      -- Timer used in cased of errors to restart the polling cycle
      -- During normal operation the polling should re-invoke itself
      server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
-     server.typingtimer = w.hook_timer(5*1000, 0, 0, "cleartyping", "")
+     server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
      return server
 end
 
@@ -985,8 +985,8 @@ end
 function Room:UpdateNick(user_id, key, val)
     local nick = self.users[user_id]
     if not nick then return end
-    local nick_ptr = w.nicklist_search_nick(self.buffer, '', self.users[user_id])
-    if nick_ptr then
+    local nick_ptr = w.nicklist_search_nick(self.buffer, '', nick)
+    if nick_ptr and key and val then
         w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
     end
 end
