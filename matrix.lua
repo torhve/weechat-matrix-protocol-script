@@ -963,7 +963,7 @@ function Room:parseChunk(chunk, backlog)
         local color = default_color
         local nick_c
         local body
-        local nick = self:addNick(chunk.user_id)
+        local nick = self.users[chunk.user_id] or self:addNick(chunk.user_id)
         if is_self then
             nick_c = w.color('chat_nick_self')
         else
@@ -988,7 +988,6 @@ function Room:parseChunk(chunk, backlog)
         elseif content['msgtype'] == 'm.notice' then
             color = wcolor('irc.color.notice')
             body = content['body']
-
         elseif content['msgtype'] == 'm.emote' then
             tag"irc_action"
             local prefix = w.config_string(
