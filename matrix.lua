@@ -438,6 +438,7 @@ MatrixServer.create = function()
      -- Timer used in cased of errors to restart the polling cycle
      -- During normal operation the polling should re-invoke itself
      server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
+     server.typingtimer = w.hook_timer(5*1000, 0, 0, "cleartyping", "")
      return server
 end
 
@@ -944,6 +945,22 @@ function Room:GetPowerLevel(user_id)
     return self.power_levels.users[user_id] or 0
 end
 
+function Room:ClearTyping()
+    for user_id, nick in pairs(self.users) do
+        local nprefix = ''
+        local nprefix_color = ''
+        if self:GetPowerLevel(user_id) >= 100 then
+            nprefix = '@'
+            nprefix_color = 'lightgreen'
+        elseif self:GetPowerLevel(user_id) >= 50 then
+            nprefix = '+'
+            nprefix_color = 'yellow'
+        end
+        self:UpdateNick(user_id, 'prefix', nprefix)
+        self:UpdateNick(user_id, 'prefix_color', nprefix_color)
+    end
+end
+
 function Room:UpdatePresence(user_id, presence)
     local nick_c = 'bar_fg'
     local nick = self.users[user_id]
@@ -955,13 +972,16 @@ function Room:UpdatePresence(user_id, presence)
         elseif presence == 'offline' then
             nick_c = 'red'
         elseif presence == 'typing' then
-            nick_c = 'magenta'
+            self:UpdateNick(user_id, 'prefix', '!')
+            self:UpdateNick(user_id, 'prefix_color', 'magenta')
+            return
         else
             dbg{err='unknown presence type',presence=presence}
         end
         self:UpdateNick(user_id, 'color', nick_c)
     end
 end
+
 function Room:UpdateNick(user_id, key, val)
     local nick = self.users[user_id]
     if not nick then return end
@@ -1219,6 +1239,13 @@ end
 
 function poll(a,b)
     SERVER:poll()
+    return w.WEECHAT_RC_OK
+end
+
+function cleartyping(a, b)
+    for id, room in pairs(SERVER.rooms) do
+        room:ClearTyping()
+    end
     return w.WEECHAT_RC_OK
 end
 
