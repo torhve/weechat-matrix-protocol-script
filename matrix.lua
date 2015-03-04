@@ -964,6 +964,11 @@ end
 function Room:UpdatePresence(user_id, presence)
     local nick_c = 'bar_fg'
     local nick = self.users[user_id]
+    if presence == 'typing' then
+        self:UpdateNick(user_id, 'prefix', '!')
+        self:UpdateNick(user_id, 'prefix_color', 'magenta')
+        return
+    end
     if user_id ~= SERVER.user_id then
         if presence == 'online' then
             nick_c =  w.info_get('irc_nick_color_name', nick)
@@ -971,10 +976,6 @@ function Room:UpdatePresence(user_id, presence)
             nick_c = 'weechat.color.nicklist_away'
         elseif presence == 'offline' then
             nick_c = 'red'
-        elseif presence == 'typing' then
-            self:UpdateNick(user_id, 'prefix', '!')
-            self:UpdateNick(user_id, 'prefix_color', 'magenta')
-            return
         else
             dbg{err='unknown presence type',presence=presence}
         end
