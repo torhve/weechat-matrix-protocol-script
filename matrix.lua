@@ -263,6 +263,10 @@ function poll_cb(data, command, rc, stdout, stderr)
                         -- invited, so lets create a room
                         SERVER:addRoom(chunk)
                     end
+                elseif chunk.type == 'm.presence' then
+                    SERVER:UpdatePresence(chunk.content)
+                else
+                    dbg({err='unknown polling event',chunk=chunk})
                 end
             end
         end
@@ -337,6 +341,7 @@ function http_cb(data, command, rc, stdout, stderr)
                     end
                 end
 
+
                 local messages = room.messages
                 if messages then
                     local chunks = messages.chunk or {}
@@ -344,6 +349,9 @@ function http_cb(data, command, rc, stdout, stderr)
                         myroom:parseChunk(chunk, true)
                     end
                 end
+            end
+            for _, chunk in pairs(js.presence) do
+                SERVER:UpdatePresence(chunk.content)
             end
             SERVER:poll()
         elseif command:find'messages' then
@@ -423,12 +431,21 @@ MatrixServer.create = function()
      server.polling = false
      server.connected = false
      server.rooms = {}
+      -- Store user presences here since they are not local to the rooms
+     server.presence = {}
      server.end_token = 'END'
      server.typing_time = os.clock()
      -- Timer used in cased of errors to restart the polling cycle
      -- During normal operation the polling should re-invoke itself
      server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
      return server
+end
+
+function MatrixServer:UpdatePresence(c)
+    self.presence[c.user_id] = c.presence
+    for id, room in pairs(self.rooms) do
+        room:UpdatePresence(c.user_id, c.presence)
+    end
 end
 
 
@@ -769,6 +786,8 @@ Room.create = function(obj)
     room.lines = {}
     -- Cache users for presence/nicklist
     room.users = {}
+    -- Cache the rooms power levels state
+    room.power_levels = {users={}}
     -- We might not be a member yet
     local state_events = obj.state or {}
     for _, state in pairs(state_events) do
@@ -837,9 +856,17 @@ function Room:create_buffer()
         self.buffer = w.buffer_new(("%s.%s")
             :format(self.server, self.name), "buffer_input_cb",
             self.name, "closed_matrix_room_cb", "")
-        -- Defined in weechat's irc-nick.h
-        self.nicklist_group = w.nicklist_add_group(self.buffer,
-                '', "999|...", "weechat.color.nicklist_group", 1)
+        self.nicklist_groups = {
+            -- Emulate OPs
+            w.nicklist_add_group(self.buffer,
+                '', "0|@", "weechat.color.nicklist_group", 1),
+            -- Emulate half-op
+            w.nicklist_add_group(self.buffer,
+                '', "1|+", "weechat.color.nicklist_group", 1),
+            -- Defined in weechat's irc-nick.h
+            w.nicklist_add_group(self.buffer,
+                '', "999|...", "weechat.color.nicklist_group", 1),
+        }
     end
     w.buffer_set(self.buffer, "nicklist", "1")
     w.buffer_set(self.buffer, "nicklist_display_groups", "0")
@@ -884,33 +911,73 @@ function Room:addNick(user_id, displayname)
     if not self.users[user_id] then
         self.users[user_id] = displayname
         self.member_count = self.member_count + 1
-        local nick_c
+        local nick_c = ''
         -- Check if this is ourselves
         if user_id == SERVER.user_id then
             w.buffer_set(self.buffer, "highlight_words", displayname)
             w.buffer_set(self.buffer, "localvar_set_nick", displayname)
-            nick_c = w.color('chat_nick_self')
-        else
-            nick_c = w.info_get('irc_nick_color_name', displayname)
+            nick_c = 'chat_nick_self'
+        end
+        local ngroup = 3
+        local nprefix = ''
+        local nprefix_color = ''
+        if self:GetPowerLevel(user_id) >= 100 then
+            ngroup = 1
+            nprefix = '@'
+            nprefix_color = 'lightgreen'
+        elseif self:GetPowerLevel(user_id) >= 50 then
+            ngroup = 2
+            nprefix = '+'
+            nprefix_color = 'yellow'
         end
         w.nicklist_add_nick(self.buffer,
-            self.nicklist_group,
+            self.nicklist_groups[ngroup],
             displayname,
-            nick_c, '', '', 1)
+            nick_c, nprefix, nprefix_color, 1)
         self:_nickListChanged()
     end
 
     return displayname
 end
 
+function Room:GetPowerLevel(user_id)
+    return self.power_levels.users[user_id] or 0
+end
+
+function Room:UpdatePresence(user_id, presence)
+    local nick_c = 'bar_fg'
+    local nick = self.users[user_id]
+    if user_id ~= SERVER.user_id then
+        if presence == 'online' then
+            nick_c =  w.info_get('irc_nick_color_name', nick)
+        elseif presence == 'unavailable' then
+            nick_c = 'weechat.color.nicklist_away'
+        elseif presence == 'offline' then
+            nick_c = 'red'
+        elseif presence == 'typing' then
+            nick_c = 'magenta'
+        else
+            dbg{err='unknown presence type',presence=presence}
+        end
+        self:UpdateNick(user_id, 'color', nick_c)
+    end
+end
+function Room:UpdateNick(user_id, key, val)
+    local nick = self.users[user_id]
+    if not nick then return end
+    local nick_ptr = w.nicklist_search_nick(self.buffer, '', self.users[user_id])
+    if nick_ptr then
+        w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
+    end
+end
+
 function Room:delNick(id)
     if self.users[id] then
-        self.users[id] = nil
-        local nick_ptr = w.nicklist_search_nick(self.buffer, self.nicklist_group)
+        local nick = self.users[id]
+        local nick_ptr = w.nicklist_search_nick(self.buffer, '', nick)
         if nick_ptr then
-            w.nicklist_remove_nick(self.buffer,
-                self.nicklist_group,
-                nick_ptr)
+            w.nicklist_remove_nick(self.buffer, nick_ptr)
+            self.users[id] = nil
         end
         self:_nickListChanged()
         return true
@@ -1110,9 +1177,13 @@ function Room:parseChunk(chunk, backlog)
         -- TODO: parse join_rules events --
         self.join_rules = chunk.content
     elseif chunk['type'] == 'm.typing' then
-        -- TODO: Typing notices. --
+        for _, id in pairs(chunk.content.user_ids) do
+            self:UpdatePresence(id, 'typing')
+        end
     elseif chunk['type'] == 'm.presence' then
-        self:addNick(chunk.content.user_id, chunk['content']['displayname'])
+        --self:addNick(chunk.content.user_id, chunk['content']['displayname'])
+        dbg'can this happen?'
+        self:UpdatePresence(chunk.content.user_id, chunk.content.presence)
     elseif chunk['type'] == 'm.room.aliases' then
         -- Use first alias, weechat doesn't really support multiple  aliases
         self:setName(chunk.content.aliases[1])
