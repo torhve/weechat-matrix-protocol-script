@@ -463,9 +463,11 @@ end
 function MatrixServer:initial_sync()
     BUFFER = w.buffer_new("matrix", "", "", "closed_matrix_buffer_cb", "")
     w.buffer_set(BUFFER, "short_name", "matrix")
+    w.buffer_set(BUFFER, "name", "matrix")
     w.buffer_set(BUFFER, "localvar_set_type", "server")
     w.buffer_set(BUFFER, "localvar_set_server", "matrix")
-    --w.buffer_set(BUFFER, "display", "auto")
+    w.buffer_set(BUFFER, "title", ("Matrix: %s"):format(w.config_get_plugin'homeserver_url'))
+    w.buffer_set(BUFFER, "display", "auto")
     local data = urllib.urlencode({
         access_token= self.access_token,
         limit= w.config_get_plugin('backlog_lines'),
@@ -854,10 +856,7 @@ function Room:_nickListChanged()
         if buffer_name:match('^!(.-):(.-)%.(.-)$') then
             for id, name in pairs(self.users) do
                 if id ~= SERVER.user_id then
-                    w.buffer_set(self.buffer, "short_name", name)
-                    w.buffer_set(self.buffer, "name", name)
-                    w.buffer_set(self.buffer, "full_name",
-                    self.server.."."..name)
+                    self:setName(name)
                 end
             end
         end
@@ -1012,7 +1011,7 @@ function Room:parseChunk(chunk, backlog)
             data)
     elseif chunk['type'] == 'm.room.name' then
         local name = chunk['content']['name']
-        w.buffer_set(self.buffer, "short_name", name)
+        self:setName(name)
     elseif chunk['type'] == 'm.room.member' then
         if chunk['content']['membership'] == 'join' then
             tag"irc_join"
