@@ -375,7 +375,6 @@ function http_cb(data, command, rc, stdout, stderr)
         elseif command:find'upload' then
             -- We store room_id in data
             local room_id = data
-            dbg(js)
             if js.content_uri then
                 SERVER:msg(room_id, js.content_uri)
             end
@@ -799,12 +798,15 @@ Room.create = function(obj)
 end
 
 function Room:setName(name)
-    w.buffer_set(self.buffer, "short_name", self.name)
-    w.buffer_set(self.buffer, "name", self.server.."."..self.name)
+    if not name or name == '' or name == json.null then
+        return
+    end
+    w.buffer_set(self.buffer, "short_name", name)
+    w.buffer_set(self.buffer, "name", name)
     -- Doesn't work
-    --w.buffer_set(self.buffer, "plugin", "matrix")
+    w.buffer_set(self.buffer, "plugin", "matrix")
     w.buffer_set(self.buffer, "full_name",
-        self.server.."."..self.name)
+        self.server.."."..name)
 end
 
 function Room:topic(topic)
@@ -864,8 +866,9 @@ function Room:_nickListChanged()
         -- Check if the room name is identifier meaning we don't have a
         -- name set yet, and should try and set one
         local buffer_name = w.buffer_get_string(self.buffer, 'name')
-        if buffer_name:match('^!(.-):(.-)%.(.-)$') then
+        if buffer_name:match('!(.-):(.-)%.(.-)$') then
             for id, name in pairs(self.users) do
+                -- Set the name to the other party
                 if id ~= SERVER.user_id then
                     self:setName(name)
                 end
@@ -895,7 +898,6 @@ function Room:addNick(user_id, displayname)
             displayname,
             nick_c, '', '', 1)
         self:_nickListChanged()
-
     end
 
     return displayname
@@ -1025,7 +1027,9 @@ function Room:parseChunk(chunk, backlog)
             data)
     elseif chunk['type'] == 'm.room.name' then
         local name = chunk['content']['name']
-        self:setName(name)
+        if name ~= '' or name ~= json.null then
+            self:setName(name)
+        end
     elseif chunk['type'] == 'm.room.member' then
         if chunk['content']['membership'] == 'join' then
             tag"irc_join"
@@ -1094,7 +1098,7 @@ function Room:parseChunk(chunk, backlog)
         end
     elseif chunk['type'] == 'm.room.create' then
         -- TODO: parse create events --
-        dbg({event='m.room.create',chunk=chunk})
+        --dbg({event='m.room.create',chunk=chunk})
     elseif chunk['type'] == 'm.room.power_levels' then
         -- TODO: parse power lvls events --
         self.power_levels = chunk.content
@@ -1109,7 +1113,8 @@ function Room:parseChunk(chunk, backlog)
         -- Use first alias, weechat doesn't really support multiple  aliases
         self:setName(chunk.content.aliases[1])
     else
-        dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
+        --dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
+        mprint(('Got unknown chunk type %s in room %s'):format(chunk.type, self.name))
     end
 end
 
