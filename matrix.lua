@@ -97,6 +97,56 @@ local function split_args(args)
     return function_name, arg
 end
 
+local function byte_to_tag(s, byte, open_tag, close_tag)
+    if s:match(byte) then
+        local inside = false
+        local open_tags = 0
+        local htmlbody = s:gsub(byte, function(c)
+            if inside then
+                inside = false
+                return close_tag
+            end
+            inside = true
+            open_tags = open_tags + 1
+            return open_tag
+        end)
+        local _, count = htmlbody:gsub(close_tag, '')
+        -- Ensure we close tags
+        if count < open_tags then
+            htmlbody = htmlbody .. close_tag
+        end
+        return htmlbody
+    end
+    return s
+end
+
+local function irc_formatting_to_html(s)
+    local ct = {'white','black','blue','green','red','markoon','purple','orange','yellow','lightgreen','teal','cyan', 'lightblue','fuchsia', 'gray', 'lightgray'}
+
+    s = byte_to_tag(s, '\02', '<em>', '</em>')
+    s = byte_to_tag(s, '\029', '<i>', '</i>')
+    s = byte_to_tag(s, '\031', '<u>', '</u>')
+    for i, c in pairs(ct) do
+        s = byte_to_tag(s, '\003'..tostring(i-1), '<font color="'..c..'">', '</font>')
+    end
+    return s
+end
+
+local function strip_irc_formatting(s)
+    if not s then return '' end
+    return (s
+        :gsub("\02", "")
+        :gsub("\03%d%d?,%d%d?", "")
+        :gsub("\03%d%d?", "")
+        :gsub("\03", "")
+        :gsub("\15", "")
+        :gsub("\17", "")
+        :gsub("\18", "")
+        :gsub("\22", "")
+        :gsub("\29", "")
+        :gsub("\31", ""))
+end
+
 function unload()
     return w.WEECHAT_RC_OK
 end
@@ -529,12 +579,22 @@ function send(data, calls)
         -- Clear message
         OUT[id] = nil
         local body = {}
+        local htmlbody = {}
         local msgtype
+
+        local ishtml = false
+
 
         for _, msg in pairs(msgs) do
             -- last msgtype will override any other for simplicity's sake
             msgtype = msg[1]
-            table.insert(body, msg[2])
+            local html = irc_formatting_to_html(msg[2])
+            if html ~= msg[2] then
+                ishtml = true
+            end
+            table.insert(htmlbody, html )
+            -- TODO strip bytes
+            table.insert(body, msg[2] )
         end
         body = table.concat(body, '\n')
 
@@ -546,23 +606,11 @@ function send(data, calls)
                 body = body,
         }}
 
-        -- Support sending bold text
-        if body:match('\02') then
-            local inside = false
-            local htmlbody = body:gsub('\02', function(c)
-                if inside then
-                    inside = false
-                    return '</b>'
-                end
-                inside = true
-                return '<b>'
-            end)
-            if not htmlbody:match('</b>') then
-                htmlbody = htmlbody .. '</b>'
-            end
+        if ishtml then
+            htmlbody = table.concat(htmlbody, '\n')
+            data.postfields.body = strip_irc_formatting(body)
             data.postfields.format = 'org.matrix.custom.html'
             data.postfields.formatted_body = htmlbody
-            data.postfields.body = body:gsub('\02', '')
         end
 
         data.postfields = json.encode(data.postfields)
@@ -705,6 +753,10 @@ Room.create = function(obj)
     room.identifier = obj['room_id']
     room.server = 'matrix'
     room.member_count = 0
+    -- Cache lines for dedup?
+    room.lines = {}
+    -- Cache users for presence/nicklist
+    room.users = {}
     -- We might not be a member yet
     local state_events = obj.state or {}
     for _, state in pairs(state_events) do
@@ -730,10 +782,6 @@ Room.create = function(obj)
         room:addNick(obj.inviter)
     end
 
-    -- Cache lines for dedup?
-    room.lines = {}
-    -- Cache users for presence/nicklist
-    room.users = {}
     return room
 end
 
