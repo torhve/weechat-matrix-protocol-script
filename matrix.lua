@@ -328,6 +328,13 @@ function http_cb(data, command, rc, stdout, stderr)
                 myroom:parseChunk(chunk, true)
             end
         elseif command:find'v1/initialSync' then
+            -- Start with setting the global presence variable on the server
+            -- so when the nicks get added to the room they can get added to
+            -- the correct nicklist group according to if they have presence
+            -- or not
+            for _, chunk in pairs(js.presence) do
+                SERVER:UpdatePresence(chunk.content)
+            end
             for _, room in pairs(js['rooms']) do
                 local myroom = SERVER:addRoom(room)
 
@@ -341,7 +348,6 @@ function http_cb(data, command, rc, stdout, stderr)
                     end
                 end
 
-
                 local messages = room.messages
                 if messages then
                     local chunks = messages.chunk or {}
@@ -350,9 +356,12 @@ function http_cb(data, command, rc, stdout, stderr)
                     end
                 end
             end
+            -- Now we have created rooms and can go over the rooms and update
+            -- the presence for each nick
             for _, chunk in pairs(js.presence) do
                 SERVER:UpdatePresence(chunk.content)
             end
+            -- We have our backlog, lets start listening for new events
             SERVER:poll()
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
@@ -860,11 +869,13 @@ function Room:create_buffer()
         self.nicklist_groups = {
             -- Emulate OPs
             w.nicklist_add_group(self.buffer,
-                '', "0|@", "weechat.color.nicklist_group", 1),
+                '', "000|@", "weechat.color.nicklist_group", 1),
             -- Emulate half-op
             w.nicklist_add_group(self.buffer,
-                '', "1|+", "weechat.color.nicklist_group", 1),
+                '', "001|+", "weechat.color.nicklist_group", 1),
             -- Defined in weechat's irc-nick.h
+            w.nicklist_add_group(self.buffer,
+                '', "998|...", "weechat.color.nicklist_group", 1),
             w.nicklist_add_group(self.buffer,
                 '', "999|...", "weechat.color.nicklist_group", 1),
         }
@@ -919,7 +930,7 @@ function Room:addNick(user_id, displayname)
             w.buffer_set(self.buffer, "localvar_set_nick", displayname)
             nick_c = 'chat_nick_self'
         end
-        local ngroup = 3
+        local ngroup = 4
         local nprefix = ''
         local nprefix_color = ''
         if self:GetPowerLevel(user_id) >= 100 then
@@ -930,11 +941,24 @@ function Room:addNick(user_id, displayname)
             ngroup = 2
             nprefix = '+'
             nprefix_color = 'yellow'
+        elseif SERVER.presence[user_id] then
+            -- User has a presence, put him in group3
+            ngroup = 3
         end
-        w.nicklist_add_nick(self.buffer,
+        local nick_ptr = w.nicklist_add_nick(self.buffer,
             self.nicklist_groups[ngroup],
             displayname,
             nick_c, nprefix, nprefix_color, 1)
+        if nick_ptr  == '' then
+            -- Duplicate nick names :(
+            -- We just add the full id to the nicklist so atleast it will show
+            -- but we should probably assign something new and track the state
+            -- so we can print msgs with non-conflicting nicks too
+            w.nicklist_add_nick(self.buffer,
+                self.nicklist_groups[ngroup],
+                user_id,
+                nick_c, nprefix, nprefix_color, 1)
+        end
         self:_nickListChanged()
     end
 
@@ -988,6 +1012,7 @@ function Room:UpdateNick(user_id, key, val)
     if not nick then return end
     local nick_ptr = w.nicklist_search_nick(self.buffer, '', nick)
     if nick_ptr and key and val then
+        -- TODO check if correct group local group = w.nicklist_nick_get_pointer(self.buffer, nick_ptr, 'group')
         w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
     end
 end
