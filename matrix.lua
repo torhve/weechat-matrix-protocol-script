@@ -917,7 +917,7 @@ function Room:_nickListChanged()
 end
 
 function Room:addNick(user_id, displayname)
-    if not displayname or displayname == json.null then
+    if not displayname or displayname == json.null or displayname == ''then
         displayname = user_id:match('@(.+):(.+)')
     end
     if not self.users[user_id] then
@@ -973,6 +973,8 @@ function Room:ClearTyping()
     for user_id, nick in pairs(self.users) do
         local nprefix = ''
         local nprefix_color = ''
+        -- TODO, cache nick colors in a table instead
+        -- of looking it up each time
         if self:GetPowerLevel(user_id) >= 100 then
             nprefix = '@'
             nprefix_color = 'lightgreen'
@@ -1011,9 +1013,25 @@ function Room:UpdateNick(user_id, key, val)
     local nick = self.users[user_id]
     if not nick then return end
     local nick_ptr = w.nicklist_search_nick(self.buffer, '', nick)
-    if nick_ptr and key and val then
+
+    if nick_ptr ~= '' and key and val then
         -- TODO check if correct group local group = w.nicklist_nick_get_pointer(self.buffer, nick_ptr, 'group')
-        w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
+        -- Check if we are clearing a typing notice, and don't issue updates
+        -- if we are, because it spams the API so much, including potential
+        -- relay clients
+        if key == 'prefix' and val == '' then
+            local prefix = w.nicklist_nick_get_string(self.buffer, nick_ptr, key)
+            if prefix == '!' then
+                w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
+            end
+        elseif key == 'prefix_color' then
+            local prefix_color = w.nicklist_nick_get_string(self.buffer, nick_ptr, key)
+            if prefix_color ~= val then
+                w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
+            end
+        else
+            w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
+        end
     end
 end
 
@@ -1021,7 +1039,7 @@ function Room:delNick(id)
     if self.users[id] then
         local nick = self.users[id]
         local nick_ptr = w.nicklist_search_nick(self.buffer, '', nick)
-        if nick_ptr then
+        if nick_ptr ~= '' then
             w.nicklist_remove_nick(self.buffer, nick_ptr)
             self.users[id] = nil
         end
