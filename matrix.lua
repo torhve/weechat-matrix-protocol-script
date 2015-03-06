@@ -9,7 +9,7 @@
 ]]
 
 
-local json = require 'cjson'
+local json = require 'cjson' -- apt-get install lua-cjson
 local w = weechat
 
 local SCRIPT_NAME = "matrix"
@@ -63,6 +63,16 @@ local function dbg(message)
         message = ("DEBUG: %s"):format(tostring(message))
         w.print(BUFFER, message)
     end
+end
+
+local function perr(message)
+    mprint(
+        SERVER.errprefix_c ..
+        SERVER.errprefix ..
+        '\t' ..
+        default_color ..
+        tostring(message)
+        )
 end
 
 local function weechat_eval(text)
@@ -229,7 +239,7 @@ end
 
 function poll_cb(data, command, rc, stdout, stderr)
     if stderr ~= '' then
-        mprint(('error: %s'):format(stderr))
+        perr(('%s'):format(stderr))
         return w.WEECHAT_RC_OK
     end
 
@@ -246,11 +256,12 @@ function poll_cb(data, command, rc, stdout, stderr)
         -- Protected call in case of JSON errors
         local success, js = pcall(json.decode, stdout)
         if not success then
-            mprint(('error\t%s during json load: %s'):format(js, stdout))
+            perr(('%s during json load: %s'):format(js, stdout))
             js = {}
         end
         if js['errcode'] then
-            mprint(js)
+            perr(js.errcode)
+            perr(js['error'])
         else
             SERVER.end_token = js['end']
             for _, chunk in pairs(js.chunk) do
@@ -266,7 +277,7 @@ function poll_cb(data, command, rc, stdout, stderr)
                 elseif chunk.type == 'm.presence' then
                     SERVER:UpdatePresence(chunk.content)
                 else
-                    dbg({err='unknown polling event',chunk=chunk})
+                    dbg{err='unknown polling event',chunk=chunk}
                 end
             end
         end
@@ -308,7 +319,8 @@ function http_cb(data, command, rc, stdout, stderr)
             if command:find'login' then
                 w.print('', ('matrix: Error code during login: %s'):format(js['errcode']))
             else
-                mprint(js)
+                perr(js.errcode)
+                perr(js['error'])
             end
             return w.WEECHAT_RC_OK
         end
@@ -418,12 +430,12 @@ function http_cb(data, command, rc, stdout, stderr)
                     :format(name, r.num_joined_members, r.topic, table.concat(r.aliases, ', ')))
             end
         else
-            dbg({['error'] = 'Unknown command in http cb', command=command,
-                js=js})
+            dbg{['error'] = 'Unknown command in http cb', command=command,
+                js=js}
         end
     end
     if tonumber(rc) == -2 then
-        mprint(('matrix: Call to API errored in command %s, maybe timeout?'):format(command))
+        perr(('Call to API errored in command %s, maybe timeout?'):format(command))
     end
 
     return w.WEECHAT_RC_OK
@@ -448,6 +460,11 @@ MatrixServer.create = function()
      -- During normal operation the polling should re-invoke itself
      server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
+
+     -- Cache error variables so we don't have to look them up for every error
+     -- message, a normal user will not change these ever anyway.
+     server.errprefix = wconf'weechat.look.prefix_error'
+     server.errprefix_c = wcolor'weechat.color.chat_prefix_error'
      return server
 end
 
@@ -462,7 +479,6 @@ end
 function MatrixServer:_getPost(post)
     local extra = {
         accept_encoding= 'application/json',
-        transfer= 'application/json',
         postfields= json.encode(post)
     }
     return extra
@@ -639,7 +655,6 @@ function send(data, calls)
 
         local data = {
             accept_encoding = 'application/json',
-            transfer = 'application/json',
             postfields= {
                 msgtype = msgtype,
                 body = body,
@@ -677,7 +692,6 @@ function MatrixServer:state(room_id, key, data)
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
          accept_encoding = 'application/json',
-         transfer = 'application/json',
          postfields= json.encode(data),
         }, 'http_cb')
 end
@@ -689,7 +703,6 @@ function MatrixServer:set_membership(room_id, userid, data)
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
          accept_encoding = 'application/json',
-         transfer = 'application/json',
          postfields= json.encode(data),
         }, 'http_cb')
 end
@@ -705,14 +718,13 @@ function MatrixServer:SendTypingNotice(room_id)
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
          accept_encoding = 'application/json',
-         transfer = 'application/json',
          postfields= json.encode(data),
         }, 'http_cb')
 end
 
 function upload_cb(data, command, rc, stdout, stderr)
     if stderr ~= '' then
-        mprint(('error: %s'):format(stderr))
+        perr(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
     end
 
@@ -918,7 +930,7 @@ end
 
 function Room:addNick(user_id, displayname)
     if not displayname or displayname == json.null or displayname == ''then
-        displayname = user_id:match('@(.+):(.+)')
+        displayname = user_id:match('@(.+):.+')
     end
     if not self.users[user_id] then
         self.users[user_id] = displayname
@@ -1067,15 +1079,14 @@ function Room:parseChunk(chunk, backlog)
         for k, v in pairs(taglist) do
             table.insert(out, k)
         end
-        local tagstring = table.concat(out, ',')
-        return tagstring
+        return table.concat(out, ',')
     end
     if not backlog then
         backlog = false
     end
 
     if backlog then
-        tag({'no_highlight','notify_none','no_log'})
+        tag{'no_highlight','notify_none','no_log'}
     end
 
     local is_self = false
@@ -1253,7 +1264,7 @@ function Room:parseChunk(chunk, backlog)
         self:setName(chunk.content.aliases[1])
     else
         --dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
-        mprint(('Got unknown chunk type %s in room %s'):format(chunk.type, self.name))
+        perr(('Unknown chunk type %s in room %s'):format(chunk.type, self.name))
     end
 end
 
@@ -1465,10 +1476,11 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- /voice
     -- /deop
     -- /devoice
+    -- /names
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
-    local cmds = {'help', 'connect', 'join', 'part'}
+    local cmds = {'help', 'connect'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
         '[command] [command options]',
         'Commands:\n' ..table.concat(cmds, '\n') ..
