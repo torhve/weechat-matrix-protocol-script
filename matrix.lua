@@ -6,6 +6,10 @@
 
  This script is considered alpha quality as only the bare minimal of
  functionality is in place and it is not very well tested.
+
+ It is known to be able to crash WeeChat in certain scenarioes so all
+ usage of this script is at your own risk.
+
 ]]
 
 
@@ -27,7 +31,6 @@ local Room
 local MatrixServer
 
 local default_color = w.color('default')
-
 
 local function tprint(tbl, indent, out)
     if not indent then indent = 0 end
@@ -131,13 +134,16 @@ local function byte_to_tag(s, byte, open_tag, close_tag)
 end
 
 local function irc_formatting_to_html(s)
-    local ct = {'white','black','blue','green','red','markoon','purple','orange','yellow','lightgreen','teal','cyan', 'lightblue','fuchsia', 'gray', 'lightgray'}
+    local ct = {'white','black','blue','green','red','markoon','purple',
+        'orange','yellow','lightgreen','teal','cyan', 'lightblue',
+        'fuchsia', 'gray', 'lightgray'}
 
     s = byte_to_tag(s, '\02', '<em>', '</em>')
     s = byte_to_tag(s, '\029', '<i>', '</i>')
     s = byte_to_tag(s, '\031', '<u>', '</u>')
     for i, c in pairs(ct) do
-        s = byte_to_tag(s, '\003'..tostring(i-1), '<font color="'..c..'">', '</font>')
+        s = byte_to_tag(s, '\003'..tostring(i-1),
+            '<font color="'..c..'">', '</font>')
     end
     return s
 end
@@ -187,8 +193,6 @@ local function format_nick(nick, is_self)
 end
 
 function command_help(current_buffer, args)
-    --help_cmds = { k[8:]: v.__doc__ for k, v in globals().items() if k.startswith("command_") }
-
     if args then
          local help_cmds = {args= help_cmds[args]}
          if not help_cmds then
@@ -317,7 +321,8 @@ function http_cb(data, command, rc, stdout, stderr)
         end
         if js['errcode'] then
             if command:find'login' then
-                w.print('', ('matrix: Error code during login: %s'):format(js['errcode']))
+                w.print('', ('matrix: Error code during login: %s'):format(
+                    js['errcode']))
             else
                 perr(js.errcode)
                 perr(js['error'])
@@ -395,7 +400,8 @@ function http_cb(data, command, rc, stdout, stderr)
                     --limit= w.config_get_plugin('backlog_lines'),
                     limit = 10,
                 })
-                http(('/rooms/%s/initialSync?%s'):format(urllib.quote(js.room_id), data), {}, 'http_cb')
+                http(('/rooms/%s/initialSync?%s'):format(
+                    urllib.quote(js.room_id), data), {}, 'http_cb')
             end
         elseif command:find'leave' then
             -- We store room_id in data
@@ -427,7 +433,11 @@ function http_cb(data, command, rc, stdout, stderr)
                     name = r.name
                 end
                 mprint(('%s %s %s %s')
-                    :format(name, r.num_joined_members, r.topic, table.concat(r.aliases, ', ')))
+                    :format(
+                        name,
+                        r.num_joined_members,
+                        r.topic,
+                        table.concat(r.aliases, ', ')))
             end
         else
             dbg{['error'] = 'Unknown command in http cb', command=command,
@@ -435,7 +445,8 @@ function http_cb(data, command, rc, stdout, stderr)
         end
     end
     if tonumber(rc) == -2 then
-        perr(('Call to API errored in command %s, maybe timeout?'):format(command))
+        perr(('Call to API errored in command %s, maybe timeout?'):format(
+            command))
     end
 
     return w.WEECHAT_RC_OK
@@ -502,7 +513,8 @@ function MatrixServer:connect()
         end
 
         self.connecting = true
-        w.print('', 'matrix: Connecting to homeserver URL: '..w.config_get_plugin('homeserver_url'))
+        w.print('', 'matrix: Connecting to homeserver URL: '..
+            w.config_get_plugin('homeserver_url'))
         local post = {
             ["type"]="m.login.password",
             ["user"]=user,
@@ -519,7 +531,8 @@ function MatrixServer:initial_sync()
     w.buffer_set(BUFFER, "name", "matrix")
     w.buffer_set(BUFFER, "localvar_set_type", "server")
     w.buffer_set(BUFFER, "localvar_set_server", "matrix")
-    w.buffer_set(BUFFER, "title", ("Matrix: %s"):format(w.config_get_plugin'homeserver_url'))
+    w.buffer_set(BUFFER, "title", ("Matrix: %s"):format(
+        w.config_get_plugin'homeserver_url'))
     w.buffer_set(BUFFER, "display", "auto")
     local data = urllib.urlencode({
         access_token= self.access_token,
@@ -881,10 +894,10 @@ function Room:create_buffer()
         self.nicklist_groups = {
             -- Emulate OPs
             w.nicklist_add_group(self.buffer,
-                '', "000|@", "weechat.color.nicklist_group", 1),
+                '', "000|o", "weechat.color.nicklist_group", 1),
             -- Emulate half-op
             w.nicklist_add_group(self.buffer,
-                '', "001|+", "weechat.color.nicklist_group", 1),
+                '', "001|v", "weechat.color.nicklist_group", 1),
             -- Defined in weechat's irc-nick.h
             w.nicklist_add_group(self.buffer,
                 '', "998|...", "weechat.color.nicklist_group", 1),
@@ -1032,12 +1045,14 @@ function Room:UpdateNick(user_id, key, val)
         -- if we are, because it spams the API so much, including potential
         -- relay clients
         if key == 'prefix' and val == '' then
-            local prefix = w.nicklist_nick_get_string(self.buffer, nick_ptr, key)
+            local prefix = w.nicklist_nick_get_string(self.buffer, nick_ptr,
+                key)
             if prefix == '!' then
                 w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
             end
         elseif key == 'prefix_color' then
-            local prefix_color = w.nicklist_nick_get_string(self.buffer, nick_ptr, key)
+            local prefix_color = w.nicklist_nick_get_string(self.buffer,
+                nick_ptr, key)
             if prefix_color ~= val then
                 w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
             end
@@ -1132,23 +1147,21 @@ function Room:parseChunk(chunk, backlog)
             body = content['body']
         elseif content['msgtype'] == 'm.emote' then
             tag"irc_action"
-            local prefix = w.config_string(
-                    w.config_get('weechat.look.prefix_action'))
+            local prefix = wconf'weechat.look.prefix_action'
             body = ("%s%s %s%s"):format(
                 nick_c, nick, color, content['body']
             )
             nick = prefix
         else
             body = content['body']
-            w.print('', 'Uknown content type')
+            perr 'Uknown content type'
             dbg(content)
         end
         local data = ("%s\t%s%s"):format(
                 format_nick(nick, is_self),
                 color,
                 body)
-        w.print_date_tags(self.buffer, time_int, tags(),
-            data)
+        w.print_date_tags(self.buffer, time_int, tags(),data)
     elseif chunk['type'] == 'm.room.topic' then
         local title = chunk['content']['topic']
         if not title then
@@ -1178,7 +1191,8 @@ function Room:parseChunk(chunk, backlog)
             local time_int = chunk['origin_server_ts']/1000
             -- Check if the chunk has prev_content or not
             -- if there is prev_content there wasn't a join but a nick change
-            if chunk.prev_content and chunk.prev_content.membership == 'join' then
+            if chunk.prev_content
+                    and chunk.prev_content.membership == 'join' then
                 local oldnick = chunk.prev_content.displayname
                 if oldnick == json.null then
                     oldnick = ''
@@ -1215,10 +1229,10 @@ function Room:parseChunk(chunk, backlog)
         elseif chunk['content']['membership'] == 'leave' then
             local nick = chunk.user_id
             local prev = chunk['prev_content']
-            if prev then
-                if prev and prev.displayname and prev.displayname ~= json.null then
-                    nick = prev.displayname
-                end
+            if (prev and
+                    prev.displayname and
+                    prev.displayname ~= json.null) then
+                nick = prev.displayname
             end
             tag"irc_quit"
             if not backlog then
@@ -1232,15 +1246,17 @@ function Room:parseChunk(chunk, backlog)
                 nick,
                 wcolor('irc.color.message_quit')
             )
-            w.print_date_tags(self.buffer, time_int, tags(),
-                data)
+            w.print_date_tags(self.buffer, time_int, tags(), data)
         elseif chunk['content']['membership'] == 'invite' then
             if not is_self then -- Check if we were the one inviting
                 mprint(('You have been invited to join room %s by %s. Type /join %s to join.')
-                    :format(self.identifier, chunk.content.creator, self.identifier))
+                    :format(
+                      self.identifier,
+                      chunk.content.creator,
+                      self.identifier))
             end
         else
-            dbg({err= 'unknown membership type in parseChunk', chunk= chunk})
+            dbg{err= 'unknown membership type in parseChunk', chunk= chunk}
         end
     elseif chunk['type'] == 'm.room.create' then
         -- TODO: parse create events --
@@ -1264,7 +1280,13 @@ function Room:parseChunk(chunk, backlog)
         self:setName(chunk.content.aliases[1])
     else
         --dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
-        perr(('Unknown chunk type %s in room %s'):format(chunk.type, self.name))
+        perr(('Unknown chunk type %s%s%s in room %s%s%s'):format(
+            w.color'bold',
+            chunk.type,
+            default_color,
+            w.color'bold',
+            self.name,
+            default_color))
     end
 end
 
@@ -1273,7 +1295,8 @@ function Room:Op(nick)
         if name == nick then
             -- patch the locally cached power levels
             self.power_levels.users[id] = 50
-            SERVER:state(self.identifier, 'm.room.power_levels', self.power_levels)
+            SERVER:state(self.identifier, 'm.room.power_levels',
+                self.power_levels)
             break
         end
     end
