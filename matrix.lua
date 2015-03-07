@@ -175,23 +175,6 @@ local function wcolor(optionname)
     return w.color(wconf(optionname))
 end
 
-local function format_nick(nick, is_self)
-    -- Turns a nick name into a weechat-styled nickname. This means giving
-    -- it colors, and proper prefix and suffix
-    local color
-    if is_self then
-        color = w.color('chat_nick_self')
-    else
-        color = w.info_get('irc_nick_color', nick)
-    end
-    local prefix = wconf('weechat.look.nick_prefix')
-    local prefix_c = wcolor('weechat.color.chat_nick_prefix')
-    local suffix = wconf('weechat.look.nick_suffix')
-    local suffix_c = wcolor('weechat.color.chat_nick_suffix')
-    local nick_f = prefix_c .. prefix .. color .. nick .. suffix_c .. suffix
-    return nick_f
-end
-
 function command_help(current_buffer, args)
     if args then
          local help_cmds = {args= help_cmds[args]}
@@ -1109,6 +1092,36 @@ function Room:delNick(id)
     end
 end
 
+function Room:formatNick(user_id)
+    -- Turns a nick name into a weechat-styled nickname. This means giving
+    -- it colors, and proper prefix and suffix
+    local nick = self.users[user_id]
+    if not nick then
+        return user_id
+    end
+    local color
+    if user_id == SERVER.user_id then
+        color = w.color('chat_nick_self')
+    else
+        color = w.info_get('irc_nick_color', nick)
+    end
+    local _, nprefix, nprefix_c = self:GetNickGroup(user_id)
+    local prefix = wconf('weechat.look.nick_prefix')
+    local prefix_c = wcolor('weechat.color.chat_nick_prefix')
+    local suffix = wconf('weechat.look.nick_suffix')
+    local suffix_c = wcolor('weechat.color.chat_nick_suffix')
+    local nick_f = prefix_c
+        .. prefix
+        .. wcolor(nprefix_c)
+        .. nprefix
+        .. color
+        .. nick
+        .. suffix_c
+        .. suffix
+    return nick_f
+end
+
+
 -- Parses a chunk of json meant for a room
 function Room:parseChunk(chunk, backlog)
     local taglist = {}
@@ -1152,14 +1165,7 @@ function Room:parseChunk(chunk, backlog)
 
         local time_int = chunk['origin_server_ts']/1000
         local color = default_color
-        local nick_c
         local body
-        local nick = self.users[chunk.user_id] or self:addNick(chunk.user_id)
-        if is_self then
-            nick_c = w.color('chat_nick_self')
-        else
-            nick_c = w.info_get('irc_nick_color', nick)
-        end
         local content = chunk['content']
         if not content['msgtype'] then
             -- We don't support redactions
@@ -1180,19 +1186,31 @@ function Room:parseChunk(chunk, backlog)
             color = wcolor('irc.color.notice')
             body = content['body']
         elseif content['msgtype'] == 'm.emote' then
+            local nick_c
+            local nick = self.users[chunk.user_id] or self:addNick(chunk.user_id)
+            if is_self then
+                nick_c = w.color('chat_nick_self')
+            else
+                nick_c = w.info_get('irc_nick_color', nick)
+            end
             tag"irc_action"
+            local prefix_c = wcolor'weechat.color.chat_prefix_action'
             local prefix = wconf'weechat.look.prefix_action'
             body = ("%s%s %s%s"):format(
                 nick_c, nick, color, content['body']
             )
-            nick = prefix
+            local data = ("%s%s\t%s"):format(
+                prefix_c,
+                prefix,
+                body)
+            return w.print_date_tags(self.buffer, time_int, tags(),data)
         else
             body = content['body']
             perr 'Uknown content type'
             dbg(content)
         end
         local data = ("%s\t%s%s"):format(
-                format_nick(nick, is_self),
+                self:formatNick(chunk.user_id),
                 color,
                 body)
         w.print_date_tags(self.buffer, time_int, tags(),data)
@@ -1205,7 +1223,7 @@ function Room:parseChunk(chunk, backlog)
         local color = wcolor("irc.color.topic_new")
         local nick = self.users[chunk.user_id] or chunk.user_id
         local data = ('--\t%s%s has changed the topic to "%s%s%s"'):format(
-                format_nick(nick, is_self),
+                nick,
                 default_color,
                 color,
                 title,
@@ -1296,9 +1314,10 @@ function Room:parseChunk(chunk, backlog)
         -- TODO: parse create events --
         --dbg({event='m.room.create',chunk=chunk})
     elseif chunk['type'] == 'm.room.power_levels' then
-        -- TODO: parse power lvls events --
         for user_id, lvl in pairs(chunk.content.users) do
-            -- calculate changes here
+            -- TODO
+            -- calculate changes here and generate message lines
+            -- describing the change
         end
         self.power_levels = chunk.content
         for user_id, lvl in pairs(self.power_levels.users) do
