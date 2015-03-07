@@ -274,7 +274,7 @@ function poll_cb(data, command, rc, stdout, stderr)
                     if room then
                         room:parseChunk(chunk)
                     else
-                        -- Chunk for non-existing room, maybe we just got 
+                        -- Chunk for non-existing room, maybe we just got
                         -- invited, so lets create a room
                         SERVER:addRoom(chunk)
                     end
@@ -420,7 +420,7 @@ function http_cb(data, command, rc, stdout, stderr)
             -- either it errs or it is empty
             --dbg({state= js})
         elseif command:find'/send/' then
-            -- XXX Errorhandling 
+            -- XXX Errorhandling
         elseif command:find'createRoom' then
             local room_id = js.room_id
             -- We get join events, so we don't have to do anything
@@ -439,6 +439,8 @@ function http_cb(data, command, rc, stdout, stderr)
                         r.topic,
                         table.concat(r.aliases, ', ')))
             end
+        elseif command:find'/invite' then
+            local room_id = js.room_id
         else
             dbg{['error'] = 'Unknown command in http cb', command=command,
                 js=js}
@@ -798,6 +800,20 @@ function MatrixServer:ListRooms()
         }, 'http_cb')
 end
 
+function MatrixServer:invite(room_id, user_id)
+    local data = {
+        user_id = user_id
+    }
+    dbg{room_id,user_id}
+    http(('/rooms/%s/invite?access_token=%s')
+        :format(urllib.quote(room_id),
+          urllib.quote(self.access_token)),
+        {customrequest = 'POST',
+         accept_encoding = 'application/json',
+         postfields= json.encode(data),
+        }, 'http_cb')
+end
+
 function buffer_input_cb(b, buffer, data)
     for r_id, room in pairs(SERVER.rooms) do
         if buffer == room.buffer then
@@ -968,7 +984,7 @@ function Room:addNick(user_id, displayname)
                 self.nicklist_groups[ngroup],
                 user_id,
                 nick_c, nprefix, nprefix_color, 1)
-            -- Since we can't allow duplicate displaynames, we just use the 
+            -- Since we can't allow duplicate displaynames, we just use the
             -- user_id straight up. Maybe we could invent some clever
             -- scheme here, like user(homeserver), user (2) or something
             self.users[user_id] = user_id
@@ -1049,7 +1065,8 @@ function Room:UpdateNick(user_id, key, val)
             -- No WeeChat API for changing a nick's group so we will have to
             -- delete the nick from the old nicklist and add it to the correct
             -- nicklist group
-            -- TODO please check if this call fails, if it does it means the 
+            local d_nick_ptr = w.nicklist_remove_nick(self.buffer, nick_ptr)
+            -- TODO please check if this call fails, if it does it means the
             -- WeeChat version is old and has a bug so it can't remove nicks
             -- and so it needs some workaround
             nick_ptr = w.nicklist_add_nick(self.buffer,
@@ -1280,7 +1297,15 @@ function Room:parseChunk(chunk, backlog)
         --dbg({event='m.room.create',chunk=chunk})
     elseif chunk['type'] == 'm.room.power_levels' then
         -- TODO: parse power lvls events --
+        for user_id, lvl in pairs(chunk.content.users) do
+            -- calculate changes here
+        end
         self.power_levels = chunk.content
+        for user_id, lvl in pairs(self.power_levels.users) do
+            local _, nprefix, nprefix_color = self:GetNickGroup(user_id)
+            self:UpdateNick(user_id, 'prefix', nprefix)
+            self:UpdateNick(user_id, 'prefix_color', nprefix_color)
+        end
     elseif chunk['type'] == 'm.room.join_rules' then
         -- TODO: parse join_rules events --
         self.join_rules = chunk.content
@@ -1342,6 +1367,10 @@ function Room:Kick(nick, reason)
             break
         end
     end
+end
+
+function Room:invite(id)
+    SERVER:invite(self.identifier, id)
 end
 
 function poll(a,b)
@@ -1429,8 +1458,22 @@ function create_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room or current_buffer == BUFFER then
         local _, args = split_args(args)
+        -- Room names are supposed to be without # and homeserver, so
+        -- we try to help the user out here
+        local alias = args:match'#?(.*):?'
         -- Create a non-public room with argument as alias
-        SERVER:CreateRoom(false, args, nil)
+        SERVER:CreateRoom(false, alias, nil)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
+function invite_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:invite(args)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -1543,8 +1586,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/voice', 'voice_command_cb', '')
     w.hook_command_run('/kick', 'kick_command_cb', '')
     w.hook_command_run('/create', 'create_command_cb', '')
+    w.hook_command_run('/invite', 'invite_command_cb', '')
     -- TODO
-    -- /invite
     -- /whois
     -- /nick
     -- /ban
