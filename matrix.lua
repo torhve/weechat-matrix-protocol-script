@@ -1425,6 +1425,18 @@ function query_command_cb(data, current_buffer, args)
     end
 end
 
+function create_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room or current_buffer == BUFFER then
+        local _, args = split_args(args)
+        -- Create a non-public room with argument as alias
+        SERVER:CreateRoom(false, args, nil)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function list_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room or current_buffer == BUFFER then
@@ -1530,9 +1542,9 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/op', 'op_command_cb', '')
     w.hook_command_run('/voice', 'voice_command_cb', '')
     w.hook_command_run('/kick', 'kick_command_cb', '')
+    w.hook_command_run('/create', 'create_command_cb', '')
     -- TODO
     -- /invite
-    -- /create
     -- /whois
     -- /nick
     -- /ban
