@@ -661,7 +661,6 @@ function send(data, calls)
                 ishtml = true
             end
             table.insert(htmlbody, html )
-            -- TODO strip bytes
             table.insert(body, msg[2] )
         end
         body = table.concat(body, '\n')
@@ -955,21 +954,7 @@ function Room:addNick(user_id, displayname)
             w.buffer_set(self.buffer, "localvar_set_nick", displayname)
             nick_c = 'chat_nick_self'
         end
-        local ngroup = 4
-        local nprefix = ''
-        local nprefix_color = ''
-        if self:GetPowerLevel(user_id) >= 100 then
-            ngroup = 1
-            nprefix = '@'
-            nprefix_color = 'lightgreen'
-        elseif self:GetPowerLevel(user_id) >= 50 then
-            ngroup = 2
-            nprefix = '+'
-            nprefix_color = 'yellow'
-        elseif SERVER.presence[user_id] then
-            -- User has a presence, put him in group3
-            ngroup = 3
-        end
+        local ngroup, nprefix, nprefix_color = self:GetNickGroup(user_id)
         local nick_ptr = w.nicklist_add_nick(self.buffer,
             self.nicklist_groups[ngroup],
             displayname,
@@ -983,11 +968,35 @@ function Room:addNick(user_id, displayname)
                 self.nicklist_groups[ngroup],
                 user_id,
                 nick_c, nprefix, nprefix_color, 1)
+            -- Since we can't allow duplicate displaynames, we just use the 
+            -- user_id straight up. Maybe we could invent some clever
+            -- scheme here, like user(homeserver), user (2) or something
+            self.users[user_id] = user_id
         end
         self:_nickListChanged()
     end
 
     return displayname
+end
+
+function Room:GetNickGroup(user_id)
+    -- TODO, cache
+    local ngroup = 4
+    local nprefix = ' '
+    local nprefix_color = ''
+    if self:GetPowerLevel(user_id) >= 100 then
+        ngroup = 1
+        nprefix = '@'
+        nprefix_color = 'lightgreen'
+    elseif self:GetPowerLevel(user_id) >= 50 then
+        ngroup = 2
+        nprefix = '+'
+        nprefix_color = 'yellow'
+    elseif SERVER.presence[user_id] then
+        -- User has a presence, put him in group3
+        ngroup = 3
+    end
+    return ngroup, nprefix, nprefix_color
 end
 
 function Room:GetPowerLevel(user_id)
@@ -996,17 +1005,7 @@ end
 
 function Room:ClearTyping()
     for user_id, nick in pairs(self.users) do
-        local nprefix = ''
-        local nprefix_color = ''
-        -- TODO, cache nick colors in a table instead
-        -- of looking it up each time
-        if self:GetPowerLevel(user_id) >= 100 then
-            nprefix = '@'
-            nprefix_color = 'lightgreen'
-        elseif self:GetPowerLevel(user_id) >= 50 then
-            nprefix = '+'
-            nprefix_color = 'yellow'
-        end
+        local _, nprefix, nprefix_color = self:GetNickGroup(user_id)
         self:UpdateNick(user_id, 'prefix', nprefix)
         self:UpdateNick(user_id, 'prefix_color', nprefix_color)
     end
@@ -1040,11 +1039,29 @@ function Room:UpdateNick(user_id, key, val)
     local nick_ptr = w.nicklist_search_nick(self.buffer, '', nick)
 
     if nick_ptr ~= '' and key and val then
-        -- TODO check if correct group local group = w.nicklist_nick_get_pointer(self.buffer, nick_ptr, 'group')
+        -- Check if we need to move the nick into another group
+        local group_ptr = w.nicklist_nick_get_pointer(self.buffer, nick_ptr,
+            'group')
+        local ngroup, nprefix, nprefix_color = self:GetNickGroup(user_id)
+        if group_ptr ~= self.nicklist_groups[ngroup] then
+            local nick_c = w.nicklist_nick_get_string(self.buffer, nick_ptr,
+                'color')
+            -- No WeeChat API for changing a nick's group so we will have to
+            -- delete the nick from the old nicklist and add it to the correct
+            -- nicklist group
+            -- TODO please check if this call fails, if it does it means the 
+            -- WeeChat version is old and has a bug so it can't remove nicks
+            -- and so it needs some workaround
+            nick_ptr = w.nicklist_add_nick(self.buffer,
+                self.nicklist_groups[ngroup],
+                nick,
+                nick_c, nprefix, nprefix_color, 1)
+        end
         -- Check if we are clearing a typing notice, and don't issue updates
         -- if we are, because it spams the API so much, including potential
         -- relay clients
-        if key == 'prefix' and val == '' then
+        if key == 'prefix' and val == ' ' then
+            -- TODO check existing values like + and @ too
             local prefix = w.nicklist_nick_get_string(self.buffer, nick_ptr,
                 key)
             if prefix == '!' then
@@ -1294,6 +1311,18 @@ function Room:Op(nick)
     for id, name in pairs(self.users) do
         if name == nick then
             -- patch the locally cached power levels
+            self.power_levels.users[id] = 100
+            SERVER:state(self.identifier, 'm.room.power_levels',
+                self.power_levels)
+            break
+        end
+    end
+end
+
+function Room:Voice(nick)
+    for id, name in pairs(self.users) do
+        if name == nick then
+            -- patch the locally cached power levels
             self.power_levels.users[id] = 50
             SERVER:state(self.identifier, 'm.room.power_levels',
                 self.power_levels)
@@ -1417,6 +1446,17 @@ function op_command_cb(data, current_buffer, args)
     end
 end
 
+function voice_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:Voice(args)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function kick_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
@@ -1459,7 +1499,6 @@ function typing_notification_cb(signal, sig_type, data)
     return w.WEECHAT_RC_OK
 end
 
-
 if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "unload", "UTF-8") then
     local settings = {
         homeserver_url= {'https://matrix.org/', 'Full URL including port to your homeserver or use default matrix.org'},
@@ -1489,6 +1528,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/query', 'query_command_cb', '')
     w.hook_command_run('/list', 'list_command_cb', '')
     w.hook_command_run('/op', 'op_command_cb', '')
+    w.hook_command_run('/voice', 'voice_command_cb', '')
     w.hook_command_run('/kick', 'kick_command_cb', '')
     -- TODO
     -- /invite
