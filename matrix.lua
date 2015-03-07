@@ -1356,6 +1356,30 @@ function Room:Voice(nick)
     end
 end
 
+function Room:Devoice(nick)
+    for id, name in pairs(self.users) do
+        if name == nick then
+            -- patch the locally cached power levels
+            self.power_levels.users[id] = 0
+            SERVER:state(self.identifier, 'm.room.power_levels',
+                self.power_levels)
+            break
+        end
+    end
+end
+
+function Room:Deop(nick)
+    for id, name in pairs(self.users) do
+        if name == nick then
+            -- patch the locally cached power levels
+            self.power_levels.users[id] = 0
+            SERVER:state(self.identifier, 'm.room.power_levels',
+                self.power_levels)
+            break
+        end
+    end
+end
+
 function Room:Kick(nick, reason)
     for id, name in pairs(self.users) do
         if name == nick then
@@ -1512,6 +1536,27 @@ function voice_command_cb(data, current_buffer, args)
     end
 end
 
+function devoice_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:Devoice(args)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+function deop_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:Deop(args)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function kick_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
@@ -1584,6 +1629,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/list', 'list_command_cb', '')
     w.hook_command_run('/op', 'op_command_cb', '')
     w.hook_command_run('/voice', 'voice_command_cb', '')
+    w.hook_command_run('/deop', 'deop_command_cb', '')
+    w.hook_command_run('/devoice', 'devoice_command_cb', '')
     w.hook_command_run('/kick', 'kick_command_cb', '')
     w.hook_command_run('/create', 'create_command_cb', '')
     w.hook_command_run('/invite', 'invite_command_cb', '')
@@ -1591,9 +1638,6 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- /whois
     -- /nick
     -- /ban
-    -- /voice
-    -- /deop
-    -- /devoice
     -- /names
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
