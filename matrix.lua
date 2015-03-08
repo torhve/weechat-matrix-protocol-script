@@ -363,6 +363,9 @@ function http_cb(data, command, rc, stdout, stderr)
             end
             -- We have our backlog, lets start listening for new events
             SERVER:poll()
+            -- Timer used in cased of errors to restart the polling cycle
+            -- During normal operation the polling should re-invoke itself
+            server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
@@ -452,9 +455,6 @@ MatrixServer.create = function()
      server.presence = {}
      server.end_token = 'END'
      server.typing_time = os.clock()
-     -- Timer used in cased of errors to restart the polling cycle
-     -- During normal operation the polling should re-invoke itself
-     server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
 
      -- Cache error variables so we don't have to look them up for every error
