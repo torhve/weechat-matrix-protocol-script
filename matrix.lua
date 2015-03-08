@@ -212,7 +212,7 @@ end
 
 local function http(url, post, cb, timeout, extra)
     if not timeout then
-        timeout = 30*1000
+        timeout = 60*1000
     end
     if not extra then
         extra = ''
@@ -227,6 +227,7 @@ end
 function poll_cb(data, command, rc, stdout, stderr)
     if stderr ~= '' then
         perr(('%s'):format(stderr))
+        SERVER.polling = false
         return w.WEECHAT_RC_OK
     end
 
