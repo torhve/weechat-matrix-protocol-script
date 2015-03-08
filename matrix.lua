@@ -365,7 +365,7 @@ function http_cb(data, command, rc, stdout, stderr)
             SERVER:poll()
             -- Timer used in cased of errors to restart the polling cycle
             -- During normal operation the polling should re-invoke itself
-            server.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
+            SERVER.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
