@@ -361,6 +361,7 @@ function http_cb(data, command, rc, stdout, stderr)
             for _, chunk in pairs(js.presence) do
                 SERVER:UpdatePresence(chunk.content)
             end
+            SERVER.end_token = js['end']
             -- We have our backlog, lets start listening for new events
             SERVER:poll()
             -- Timer used in cased of errors to restart the polling cycle
@@ -1682,6 +1683,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- /whois
     -- /ban
     -- /names
+    -- Lazyload messages instead of HUGE initialSync
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
