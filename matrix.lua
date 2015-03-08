@@ -255,7 +255,7 @@ function poll_cb(data, command, rc, stdout, stderr)
                  if chunk.room_id then
                     local room = SERVER.rooms[chunk['room_id']]
                     if room then
-                        room:parseChunk(chunk)
+                        room:parseChunk(chunk, 'messages')
                     else
                         -- Chunk for non-existing room, maybe we just got
                         -- invited, so lets create a room
@@ -322,10 +322,10 @@ function http_cb(data, command, rc, stdout, stderr)
         elseif command:find'/rooms/.*/initialSync' then
             local myroom = SERVER:addRoom(js)
             for _, chunk in pairs(js['presence']) do
-                myroom:parseChunk(chunk, true)
+                myroom:parseChunk(chunk, true, 'presence')
             end
             for _, chunk in pairs(js['messages']['chunk']) do
-                myroom:parseChunk(chunk, true)
+                myroom:parseChunk(chunk, true, 'messages')
             end
         elseif command:find'v1/initialSync' then
             -- Start with setting the global presence variable on the server
@@ -344,7 +344,7 @@ function http_cb(data, command, rc, stdout, stderr)
                 if states then
                     local chunks = room.state or {}
                     for _, chunk in pairs(chunks) do
-                        myroom:parseChunk(chunk, true)
+                        myroom:parseChunk(chunk, true, 'states')
                     end
                 end
 
@@ -352,7 +352,7 @@ function http_cb(data, command, rc, stdout, stderr)
                 if messages then
                     local chunks = messages.chunk or {}
                     for _, chunk in pairs(chunks) do
-                        myroom:parseChunk(chunk, true)
+                        myroom:parseChunk(chunk, true, 'messages')
                     end
                 end
             end
@@ -1137,7 +1137,7 @@ end
 
 
 -- Parses a chunk of json meant for a room
-function Room:parseChunk(chunk, backlog)
+function Room:parseChunk(chunk, backlog, chunktype)
     local taglist = {}
     local tag = function(tag)
         -- Helper function to add tags
@@ -1278,7 +1278,9 @@ function Room:parseChunk(chunk, backlog)
                     default_color,
                     w.info_get('irc_nick_color', nick),
                     nick)
-                w.print_date_tags(self.buffer, time_int, tags(), data)
+                if chunktype == 'messages' then
+                    w.print_date_tags(self.buffer, time_int, tags(), data)
+                end
             else
                 local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
                     wcolor('weechat.color.chat_prefix_join'),
@@ -1290,7 +1292,9 @@ function Room:parseChunk(chunk, backlog)
                     chunk.user_id,
                     wcolor('irc.color.message_join')
                 )
-                w.print_date_tags(self.buffer, time_int, tags(), data)
+                if chunktype == 'messages' then
+                    w.print_date_tags(self.buffer, time_int, tags(), data)
+                end
             end
         elseif chunk['content']['membership'] == 'leave' then
             local nick = chunk.user_id
@@ -1312,7 +1316,9 @@ function Room:parseChunk(chunk, backlog)
                 nick,
                 wcolor('irc.color.message_quit')
             )
-            w.print_date_tags(self.buffer, time_int, tags(), data)
+            if chunktype == 'messages' then
+                w.print_date_tags(self.buffer, time_int, tags(), data)
+            end
         elseif chunk['content']['membership'] == 'invite' then
             if not is_self then -- Check if we were the one inviting
                 mprint(('You have been invited to join room %s by %s. Type /join %s to join.')
@@ -1648,7 +1654,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         homeserver_url= {'https://matrix.org/', 'Full URL including port to your homeserver or use default matrix.org'},
         user= {'', 'Your homeserver username'},
         password= {'', 'Your homeserver password'},
-        backlog_lines= {'20', 'Number of lines to fetch from backlog upon connecting'},
+        backlog_lines= {'120', 'Number of lines to fetch from backlog upon connecting'},
         autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
     }
