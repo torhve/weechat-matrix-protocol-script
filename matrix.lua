@@ -787,11 +787,24 @@ function MatrixServer:invite(room_id, user_id)
     local data = {
         user_id = user_id
     }
-    dbg{room_id,user_id}
     http(('/rooms/%s/invite?access_token=%s')
         :format(urllib.quote(room_id),
           urllib.quote(self.access_token)),
         {customrequest = 'POST',
+         accept_encoding = 'application/json',
+         postfields= json.encode(data),
+        }, 'http_cb')
+end
+
+function MatrixServer:Nick(displayname)
+    local data = {
+        displayname = displayname,
+    }
+    http(('/profile/%s/displayname?access_token=%s')
+        :format(
+          urllib.quote(self.user_id),
+          urllib.quote(self.access_token)),
+        {customrequest = 'PUT',
          accept_encoding = 'application/json',
          postfields= json.encode(data),
         }, 'http_cb')
@@ -1587,6 +1600,17 @@ function kick_command_cb(data, current_buffer, args)
     end
 end
 
+function nick_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room or current_buffer == BUFFER then
+        local _, nick = split_args(args)
+        SERVER:Nick(nick)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1653,9 +1677,9 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/kick', 'kick_command_cb', '')
     w.hook_command_run('/create', 'create_command_cb', '')
     w.hook_command_run('/invite', 'invite_command_cb', '')
+    w.hook_command_run('/nick', 'nick_command_cb', '')
     -- TODO
     -- /whois
-    -- /nick
     -- /ban
     -- /names
     if w.config_get_plugin('typing_notices') == 'on' then
