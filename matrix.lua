@@ -228,7 +228,6 @@ function poll_cb(data, command, rc, stdout, stderr)
     if stderr ~= '' then
         perr(('%s'):format(stderr))
         SERVER.polling = false
-        return w.WEECHAT_RC_OK
     end
 
     if stdout ~= '' then
@@ -238,7 +237,7 @@ function poll_cb(data, command, rc, stdout, stderr)
         table.insert(STDOUT[command], stdout)
     end
 
-    if tonumber(rc) >= 0 then
+    if tonumber(rc) >= 0 and STDOUT[command]  then
         stdout = table.concat(STDOUT[command])
         STDOUT[command] = nil
         -- Protected call in case of JSON errors
@@ -256,7 +255,7 @@ function poll_cb(data, command, rc, stdout, stderr)
                  if chunk.room_id then
                     local room = SERVER.rooms[chunk['room_id']]
                     if room then
-                        room:parseChunk(chunk, 'messages')
+                        room:parseChunk(chunk, false, 'messages')
                     else
                         -- Chunk for non-existing room, maybe we just got
                         -- invited, so lets create a room
@@ -269,14 +268,17 @@ function poll_cb(data, command, rc, stdout, stderr)
                 end
             end
         end
-    end
-    if tonumber(rc) == -2 or tonumber(rc) >= 0 then
-        if STDOUT[command] then
-            STDOUT[command] = nil
-        end
         SERVER.polling = false
         SERVER:poll()
     end
+    -- Empty cache in case of errors
+    if tonumber(rc) ~= 0 then
+        if STDOUT[command] then
+            STDOUT[command] = nil
+            SERVER.polling = false
+        end
+    end
+
     return w.WEECHAT_RC_OK
 end
 
@@ -367,7 +369,7 @@ function http_cb(data, command, rc, stdout, stderr)
             SERVER:poll()
             -- Timer used in cased of errors to restart the polling cycle
             -- During normal operation the polling should re-invoke itself
-            SERVER.polltimer = w.hook_timer(5*1000, 0, 0, "poll", "")
+            SERVER.polltimer = w.hook_timer(30*1000, 0, 0, "poll", "")
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
@@ -1228,7 +1230,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 self:formatNick(chunk.user_id),
                 color,
                 body)
-        w.print_date_tags(self.buffer, time_int, tags(),data)
+        w.print_date_tags(self.buffer, time_int, tags(), data)
     elseif chunk['type'] == 'm.room.topic' then
         local title = chunk['content']['topic']
         if not title then
