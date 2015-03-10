@@ -1471,7 +1471,8 @@ function cleartyping(a, b)
 end
 
 function join_command_cb(data, current_buffer, args)
-    if current_buffer == BUFFER then
+    local room = SERVER:findRoom(current_buffer)
+    if current_buffer == BUFFER or room then
         local _, args = split_args(args)
         SERVER:join(args)
         return w.WEECHAT_RC_OK_EAT
