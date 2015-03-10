@@ -250,8 +250,10 @@ function poll_cb(data, command, rc, stdout, stderr)
             perr(js.errcode)
             perr(js['error'])
         else
-            SERVER.end_token = js['end']
-            for _, chunk in pairs(js.chunk) do
+            if js['end'] then
+                SERVER.end_token = js['end']
+            end
+            for _, chunk in pairs(js.chunk or {}) do
                  if chunk.room_id then
                     local room = SERVER.rooms[chunk['room_id']]
                     if room then
