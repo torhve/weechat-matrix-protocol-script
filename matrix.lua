@@ -369,7 +369,7 @@ function http_cb(data, command, rc, stdout, stderr)
             SERVER:poll()
             -- Timer used in cased of errors to restart the polling cycle
             -- During normal operation the polling should re-invoke itself
-            SERVER.polltimer = w.hook_timer(30*1000, 0, 0, "poll", "")
+            SERVER.polltimer = w.hook_timer(30*1000, 0, 0, "polltimer_cb", "")
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
@@ -573,10 +573,11 @@ function MatrixServer:poll()
         return
     end
     self.polling = true
+    self.polltime = os.clock()
     local data = urllib.urlencode({
-        access_token= self.access_token,
-        timeout= 1000*30,
-        from= self.end_token
+        access_token = self.access_token,
+        timeout = 1000*30,
+        from = self.end_token
     })
     http('/events?'..data, {}, 'poll_cb')
 end
@@ -876,6 +877,7 @@ function Room:setName(name)
     w.buffer_set(self.buffer, "plugin", "matrix")
     w.buffer_set(self.buffer, "full_name",
         self.server.."."..name)
+    w.buffer_set(self.buffer, "localvar_set_channel", name)
 end
 
 function Room:topic(topic)
@@ -1441,6 +1443,15 @@ end
 
 function poll(a,b)
     SERVER:poll()
+    return w.WEECHAT_RC_OK
+end
+
+function polltimer_cb(a,b)
+    local now = os.clock()
+    if (now - SERVER.polltime) > 30 then
+        SERVER.polling = false
+        SERVER:poll()
+    end
     return w.WEECHAT_RC_OK
 end
 
