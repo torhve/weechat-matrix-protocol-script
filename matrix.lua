@@ -949,13 +949,19 @@ function Room:_nickListChanged()
         -- Check if the room name is identifier meaning we don't have a
         -- name set yet, and should try and set one
         local buffer_name = w.buffer_get_string(self.buffer, 'name')
-        if buffer_name:match('!(.-):(.-)%.(.-)$') then
+        if not self.roomname and not self.aliases then
             for id, name in pairs(self.users) do
                 -- Set the name to the other party
                 if id ~= SERVER.user_id then
                     self:setName(name)
+                    break
                 end
             end
+        end
+    elseif self.member_count == 1 then
+        if not self.roomname and not self.aliases then
+            -- Set the name to ourselves
+            self:setName(self.users[SERVER.user_id])
         end
     end
 end
@@ -1208,7 +1214,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             body = content['body']
         elseif content['msgtype'] == 'm.emote' then
             local nick_c
-            local nick = self.users[chunk.user_id] or self:addNick(chunk.user_id)
+            local nick = self.users[chunk.user_id] or chunk.user_id
             if is_self then
                 nick_c = w.color('chat_nick_self')
             else
@@ -1254,6 +1260,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             data)
     elseif chunk['type'] == 'm.room.name' then
         local name = chunk['content']['name']
+        self.roomname = name
         if name ~= '' or name ~= json.null then
             self:setName(name)
         end
@@ -1289,17 +1296,17 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     w.print_date_tags(self.buffer, time_int, tags(), data)
                 end
             else
-                local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
-                    wcolor('weechat.color.chat_prefix_join'),
-                    wconf('weechat.look.prefix_join'),
-                    w.info_get('irc_nick_color', nick),
-                    nick,
-                    wcolor('irc.color.message_join'),
-                    wcolor'weechat.color.chat_host',
-                    chunk.user_id,
-                    wcolor('irc.color.message_join')
-                )
                 if chunktype == 'messages' then
+                    local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
+                        wcolor('weechat.color.chat_prefix_join'),
+                        wconf('weechat.look.prefix_join'),
+                        w.info_get('irc_nick_color', nick),
+                        nick,
+                        wcolor('irc.color.message_join'),
+                        wcolor'weechat.color.chat_host',
+                        chunk.user_id,
+                        wcolor('irc.color.message_join')
+                    )
                     w.print_date_tags(self.buffer, time_int, tags(), data)
                 end
             end
@@ -1312,9 +1319,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 nick = prev.displayname
             end
             tag"irc_quit"
-            if not backlog then
-                self:delNick(nick)
-            end
+            self:delNick(nick)
             local time_int = chunk['origin_server_ts']/1000
             local data = ('%s%s\t%s%s%s left the room.'):format(
                 wcolor('weechat.color.chat_prefix_quit'),
@@ -1365,6 +1370,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         self:UpdatePresence(chunk.content.user_id, chunk.content.presence)
     elseif chunk['type'] == 'm.room.aliases' then
         -- Use first alias, weechat doesn't really support multiple  aliases
+        self.aliases = chunk.content.aliases
         self:setName(chunk.content.aliases[1])
     else
         --dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
