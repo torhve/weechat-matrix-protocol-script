@@ -261,7 +261,17 @@ function poll_cb(data, command, rc, stdout, stderr)
                     else
                         -- Chunk for non-existing room, maybe we just got
                         -- invited, so lets create a room
-                        SERVER:addRoom(chunk)
+                        if chunk.content and chunk.content.membership and
+                              chunk.content.membership == 'invite' then
+                            local newroom = SERVER:addRoom(chunk)
+                            newroom:parseChunk(chunk, false, 'messages')
+                        elseif chunk.content and chunk.content.membership and
+                              chunk.content.membership == 'leave' then
+                              -- Ignore leave events
+                        else
+
+                            dbg{err='Event for unknown room',event=chunk}
+                        end
                     end
                 elseif chunk.type == 'm.presence' then
                     SERVER:UpdatePresence(chunk.content)
@@ -588,13 +598,16 @@ function MatrixServer:addRoom(room)
     local myroom = Room.create(room)
     myroom:create_buffer()
     self.rooms[room['room_id']] = myroom
+    if room.inviter then
+        myroom:addNick(room.inviter)
+    end
     return myroom
 end
 
 function MatrixServer:delRoom(room_id)
     for id, room in pairs(self.rooms) do
         if id == room_id then
-            mprint(BUFFER, '\tLeaving room '..room.name..':'..room.server)
+            mprint('\tLeft room '..room.name)
             room:destroy()
             self.rooms[id] = nil
             break
@@ -863,7 +876,6 @@ Room.create = function(obj)
         else
             mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.identifier, obj.inviter, room.identifier))
         end
-        room:addNick(obj.inviter)
     end
 
     return room
@@ -1332,12 +1344,19 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         elseif chunk['content']['membership'] == 'invite' then
+            self:addNick(chunk.user_id)
             if not is_self then -- Check if we were the one inviting
-                mprint(('You have been invited to join room %s by %s. Type /join %s to join.')
-                    :format(
-                      self.identifier,
-                      chunk.content.creator,
-                      self.identifier))
+                if w.config_get_plugin('autojoin_on_invite') == 'on' then
+                    SERVER:join(self.identifier)
+                    mprint(('%s invited you'):format(
+                        chunk.user_id))
+                else
+                    mprint(('You have been invited to join room %s by %s. Type /join %s to join.')
+                        :format(
+                          self.identifier,
+                          chunk.user_id,
+                          self.identifier))
+                end
             end
         else
             dbg{err= 'unknown membership type in parseChunk', chunk= chunk}
@@ -1365,15 +1384,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
             self:UpdatePresence(id, 'typing')
         end
     elseif chunk['type'] == 'm.presence' then
-        --self:addNick(chunk.content.user_id, chunk['content']['displayname'])
-        dbg'can this happen?'
-        self:UpdatePresence(chunk.content.user_id, chunk.content.presence)
+        SERVER:UpdatePresence(chunk)
     elseif chunk['type'] == 'm.room.aliases' then
         -- Use first alias, weechat doesn't really support multiple  aliases
         self.aliases = chunk.content.aliases
         self:setName(chunk.content.aliases[1])
     else
-        --dbg({err= 'unknown chunk type in parseChunk', chunk= chunk})
         perr(('Unknown chunk type %s%s%s in room %s%s%s'):format(
             w.color'bold',
             chunk.type,
