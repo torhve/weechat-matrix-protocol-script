@@ -261,8 +261,10 @@ function poll_cb(data, command, rc, stdout, stderr)
                     else
                         -- Chunk for non-existing room, maybe we just got
                         -- invited, so lets create a room
-                        if chunk.content and chunk.content.membership and
-                              chunk.content.membership == 'invite' then
+                        if (chunk.content and chunk.content.membership and
+                              chunk.content.membership == 'invite') -- or maybe we just created a new room ourselves
+                              or chunk['type'] == 'm.room.create'
+                              then
                             local newroom = SERVER:addRoom(chunk)
                             newroom:parseChunk(chunk, false, 'messages')
                         elseif chunk.content and chunk.content.membership and
@@ -598,7 +600,7 @@ function MatrixServer:addRoom(room)
     local myroom = Room.create(room)
     myroom:create_buffer()
     self.rooms[room['room_id']] = myroom
-    if room.inviter then
+    if room.membership == 'invite' and room.inviter then
         myroom:addNick(room.inviter)
     end
     return myroom
@@ -939,6 +941,7 @@ function Room:create_buffer()
     w.buffer_set(self.buffer, "nicklist", "1")
     w.buffer_set(self.buffer, "nicklist_display_groups", "0")
     w.buffer_set(self.buffer, "localvar_set_server", self.server)
+    w.buffer_set(self.buffer, "localvar_set_roomid", self.identifier)
     self:setName(self.name)
 end
 
@@ -1344,10 +1347,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         elseif chunk['content']['membership'] == 'invite' then
-            self:addNick(chunk.user_id)
-            if not is_self then -- Check if we were the one inviting
+            -- Check if we were the one being invited
+            if chunk.state_key == SERVER.user_id and
+                  (not backlog and chunktype=='messages') then
                 if w.config_get_plugin('autojoin_on_invite') == 'on' then
                     SERVER:join(self.identifier)
+                    self:addNick(chunk.user_id)
                     mprint(('%s invited you'):format(
                         chunk.user_id))
                 else
