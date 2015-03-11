@@ -245,6 +245,10 @@ function poll_cb(data, command, rc, stdout, stderr)
         if not success then
             perr(('%s during json load: %s'):format(js, stdout))
             js = {}
+            -- Return here so we don't go spinning into a crazy loop in 
+            -- case of errors. This will make the polltimer kick in in 30
+            -- seconds or so
+            return w.WEECHAT_RC_OK
         end
         if js['errcode'] then
             perr(js.errcode)
