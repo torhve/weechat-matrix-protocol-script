@@ -1031,9 +1031,17 @@ function Room:GetNickGroup(user_id)
     local nprefix_color = ''
     if self:GetPowerLevel(user_id) >= 100 then
         ngroup = 1
+        nprefix = '&'
+        nprefix_color = 'lightgreen'
+        if user_id == self.creator then
+            nprefix = '~'
+            nprefix_color = 'lightred'
+        end
+    elseif self:GetPowerLevel(user_id) >= 50 then
+        ngroup = 2
         nprefix = '@'
         nprefix_color = 'lightgreen'
-    elseif self:GetPowerLevel(user_id) >= 50 then
+    elseif self:GetPowerLevel(user_id) > 0 then
         ngroup = 2
         nprefix = '+'
         nprefix_color = 'yellow'
@@ -1371,8 +1379,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             dbg{err= 'unknown membership type in parseChunk', chunk= chunk}
         end
     elseif chunk['type'] == 'm.room.create' then
-        -- TODO: parse create events --
-        --dbg({event='m.room.create',chunk=chunk})
+        self.creator = chunk.content.creator
     elseif chunk['type'] == 'm.room.power_levels' then
         for user_id, lvl in pairs(chunk.content.users) do
             -- TODO
