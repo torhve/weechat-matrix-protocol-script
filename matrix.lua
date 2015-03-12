@@ -322,6 +322,7 @@ function http_cb(data, command, rc, stdout, stderr)
         if not success then
             mprint(('error\t%s during json load: %s'):format(js, stdout))
             js = {}
+            return w.WEECHAT_RC_OK
         end
         if js['errcode'] then
             if command:find'login' then
@@ -476,7 +477,7 @@ MatrixServer.create = function()
       -- Store user presences here since they are not local to the rooms
      server.presence = {}
      server.end_token = 'END'
-     server.typing_time = os.clock()
+     server.typing_time = os.time()
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
 
      -- Cache error variables so we don't have to look them up for every error
@@ -591,7 +592,7 @@ function MatrixServer:poll()
         return
     end
     self.polling = true
-    self.polltime = os.clock()
+    self.polltime = os.time()
     local data = urllib.urlencode({
         access_token = self.access_token,
         timeout = 1000*30,
@@ -1487,7 +1488,7 @@ function poll(a,b)
 end
 
 function polltimer_cb(a,b)
-    local now = os.clock()
+    local now = os.time()
     if (now - SERVER.polltime) > 30 then
         SERVER.polling = false
         SERVER:poll()
