@@ -245,7 +245,7 @@ function poll_cb(data, command, rc, stdout, stderr)
         if not success then
             perr(('%s during json load: %s'):format(js, stdout))
             js = {}
-            -- Return here so we don't go spinning into a crazy loop in 
+            -- Return here so we don't go spinning into a crazy loop in
             -- case of errors. This will make the polltimer kick in in 30
             -- seconds or so
             return w.WEECHAT_RC_OK
@@ -262,8 +262,8 @@ function poll_cb(data, command, rc, stdout, stderr)
                     local room = SERVER.rooms[chunk['room_id']]
                     if room then
                         room:parseChunk(chunk, false, 'messages')
-                    else
-                        -- Chunk for non-existing room, maybe we just got
+                else
+                    -- Chunk for non-existing room, maybe we just got
                         -- invited, so lets create a room
                         if (chunk.content and chunk.content.membership and
                               chunk.content.membership == 'invite') -- or maybe we just created a new room ourselves
@@ -591,8 +591,8 @@ function MatrixServer:poll()
     if self.connected == false or self.polling then
         return
     end
-    self.polling = true
     self.polltime = os.time()
+    self.polling = true
     local data = urllib.urlencode({
         access_token = self.access_token,
         timeout = 1000*30,
@@ -653,6 +653,10 @@ function MatrixServer:ClearSendTimer()
 end
 
 function send(data, calls)
+    -- Schedule a poll so that sending a message will try to poll messages
+    -- if we came back from a server error, which has a wait time becaue of
+    -- the polltimer.
+    SERVER:poll()
     SERVER:ClearSendTimer()
     -- Iterate rooms
     for id, msgs in pairs(OUT) do
@@ -1489,7 +1493,7 @@ end
 
 function polltimer_cb(a,b)
     local now = os.time()
-    if (now - SERVER.polltime) > 30 then
+    if (now - SERVER.polltime) > 65 then
         SERVER.polling = false
         SERVER:poll()
     end
