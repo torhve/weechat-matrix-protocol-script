@@ -60,11 +60,12 @@ local function mprint(message)
 end
 
 local function dbg(message)
+    mprint('________')
     if type(message) == 'table' then
         tprint(message)
     else
         message = ("DEBUG: %s"):format(tostring(message))
-        w.print(BUFFER, message)
+        mprint(BUFFER, message)
     end
 end
 
@@ -991,12 +992,14 @@ function Room:_nickListChanged()
 end
 
 function Room:addNick(user_id, displayname)
-    if not displayname or displayname == json.null or displayname == ''then
+    if not displayname or displayname == json.null or displayname == '' then
         displayname = user_id:match('@(.*):.+')
     end
     if not self.users[user_id] then
-        self.users[user_id] = displayname
         self.member_count = self.member_count + 1
+    end
+    if self.users[user_id] ~= displayname then
+        self.users[user_id] = displayname
         local nick_c = ''
         -- Check if this is ourselves
         if user_id == SERVER.user_id then
@@ -1005,10 +1008,16 @@ function Room:addNick(user_id, displayname)
             nick_c = 'chat_nick_self'
         end
         local ngroup, nprefix, nprefix_color = self:GetNickGroup(user_id)
-        local nick_ptr = w.nicklist_add_nick(self.buffer,
+        -- Check if nick already exists
+        --local nick_ptr = w.nicklist_search_nick(self.buffer, '', displayname)
+        --if nick_ptr == '' then
+        nick_ptr = w.nicklist_add_nick(self.buffer,
             self.nicklist_groups[ngroup],
             displayname,
             nick_c, nprefix, nprefix_color, 1)
+        --else
+        --    -- TODO CHANGE nickname here
+        --end
         if nick_ptr  == '' then
             -- Duplicate nick names :(
             -- We just add the full id to the nicklist so atleast it will show
@@ -1145,6 +1154,7 @@ function Room:delNick(id)
         if nick_ptr ~= '' then
             w.nicklist_remove_nick(self.buffer, nick_ptr)
             self.users[id] = nil
+            self.member_count = self.member_count - 1
         end
         self:_nickListChanged()
         return true
@@ -1299,22 +1309,29 @@ function Room:parseChunk(chunk, backlog, chunktype)
     elseif chunk['type'] == 'm.room.member' then
         if chunk['content']['membership'] == 'join' then
             tag"irc_join"
-            local nick = self:addNick(chunk.user_id, chunk.content.displayname)
+            --- FIXME shouldn't be neccessary adding all the time
+            local nick = self.users[chunk.user_id] or self:addNick(chunk.user_id, chunk.content.displayname)
+            local name = chunk.content.displayname
+            if not name or name == json.null or name == '' then
+                name = chunk.user_id
+            end
             local time_int = chunk['origin_server_ts']/1000
             -- Check if the chunk has prev_content or not
             -- if there is prev_content there wasn't a join but a nick change
             if chunk.prev_content
-                    and chunk.prev_content.membership == 'join' then
+                    and chunk.prev_content.membership == 'join'
+                    and chunktype == 'messages' then
                 local oldnick = chunk.prev_content.displayname
                 if oldnick == json.null then
-                    oldnick = ''
+                    oldnick = chunk.user_id
                 else
-                    if oldnick == nick then
+                    if oldnick == name then
                         -- Maybe they changed their avatar or something else
                         -- that we don't care about
                         return
                     end
-                    self:delNick(oldnick)
+                    self:delNick(chunk.user_id)
+                    nick = self:addNick(chunk.user_id, chunk.content.displayname)
                 end
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
                 local data = ('%s--\t%s%s%s is now known as %s%s'):format(
@@ -1322,45 +1339,43 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     w.info_get('irc_nick_color', oldnick),
                     oldnick,
                     default_color,
-                    w.info_get('irc_nick_color', nick),
-                    nick)
-                if chunktype == 'messages' then
-                    w.print_date_tags(self.buffer, time_int, tags(), data)
-                end
-            else
-                if chunktype == 'messages' then
-                    local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
-                        wcolor('weechat.color.chat_prefix_join'),
-                        wconf('weechat.look.prefix_join'),
-                        w.info_get('irc_nick_color', nick),
-                        nick,
-                        wcolor('irc.color.message_join'),
-                        wcolor'weechat.color.chat_host',
-                        chunk.user_id,
-                        wcolor('irc.color.message_join')
-                    )
-                    w.print_date_tags(self.buffer, time_int, tags(), data)
-                end
+                    w.info_get('irc_nick_color', name),
+                    name)
+                w.print_date_tags(self.buffer, time_int, tags(), data)
+            elseif chunktype == 'messages' then
+                local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
+                    wcolor('weechat.color.chat_prefix_join'),
+                    wconf('weechat.look.prefix_join'),
+                    w.info_get('irc_nick_color', name),
+                    name,
+                    wcolor('irc.color.message_join'),
+                    wcolor'weechat.color.chat_host',
+                    chunk.user_id,
+                    wcolor('irc.color.message_join')
+                )
+                w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         elseif chunk['content']['membership'] == 'leave' then
-            local nick = chunk.user_id
-            local prev = chunk['prev_content']
-            if (prev and
-                    prev.displayname and
-                    prev.displayname ~= json.null) then
-                nick = prev.displayname
+            if chunktype == 'states' then
+                self:delNick(chunk.user_id)
             end
-            tag"irc_quit"
-            self:delNick(nick)
-            local time_int = chunk['origin_server_ts']/1000
-            local data = ('%s%s\t%s%s%s left the room.'):format(
-                wcolor('weechat.color.chat_prefix_quit'),
-                wconf('weechat.look.prefix_quit'),
-                w.info_get('irc_nick_color', nick),
-                nick,
-                wcolor('irc.color.message_quit')
-            )
             if chunktype == 'messages' then
+                local nick = chunk.user_id
+                local prev = chunk['prev_content']
+                if (prev and
+                        prev.displayname and
+                        prev.displayname ~= json.null) then
+                    nick = prev.displayname
+                end
+                tag"irc_quit"
+                local time_int = chunk['origin_server_ts']/1000
+                local data = ('%s%s\t%s%s%s left the room.'):format(
+                    wcolor('weechat.color.chat_prefix_quit'),
+                    wconf('weechat.look.prefix_quit'),
+                    w.info_get('irc_nick_color', nick),
+                    nick,
+                    wcolor('irc.color.message_quit')
+                )
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         elseif chunk['content']['membership'] == 'invite' then
