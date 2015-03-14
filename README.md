@@ -1,6 +1,14 @@
-# WeeChat Matrix.org Client
+# Matrix Client script for WeeChat
 
 This script is considered beta quality as not all functionality is in place and still has known bugs, and unknown bugs to be discovered and fixed.
+
+## What is Matrix ?
+
+Matrix is a new open source realtime federated chat protocol. You can read more about it on [http://matrix.org/blog/faq/](their website).
+
+## What is WeeChat ?
+
+[http://weechat.org](WeeChat) is a super powerful CLI chat client that's extensible in many languages to allow for new protocols like Matrix.
 
 ## How to load and use the plugin
 
@@ -35,8 +43,6 @@ sudo luarocks install lua-cjson
 export LUA_PATH="/opt/local/share/luarocks/share/lua/5.2/?.lua;/opt/local/share/luarocks/share/lua/5.2/?/init.lua;$LUA_PATH"
 export LUA_CPATH="/opt/local/share/luarocks/lib/lua/5.2/?.so;$LUA_CPATH"
 ```
-
-
 
 
 
