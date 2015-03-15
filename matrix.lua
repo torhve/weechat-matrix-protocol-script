@@ -1510,6 +1510,23 @@ function Room:Kick(nick, reason)
     end
 end
 
+function Room:Whois(nick)
+    for id, name in pairs(self.users) do
+        if name == nick then
+            local pcolor = wcolor'weechat.color.chat_prefix_network'
+            local data = ('%s--\t%s%s%s has user id %s%s'):format(
+                pcolor,
+                w.info_get('irc_nick_color', nick),
+                nick,
+                default_color,
+                w.info_get('irc_nick_color', id),
+                id)
+            w.print_date_tags(self.buffer, nil, 'notify_message', data)
+            break
+        end
+    end
+end
+
 function Room:invite(id)
     SERVER:invite(self.identifier, id)
 end
@@ -1706,6 +1723,17 @@ function nick_command_cb(data, current_buffer, args)
     end
 end
 
+function whois_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, nick = split_args(args)
+        room:Whois(nick)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1773,8 +1801,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/create', 'create_command_cb', '')
     w.hook_command_run('/invite', 'invite_command_cb', '')
     w.hook_command_run('/nick', 'nick_command_cb', '')
+    w.hook_command_run('/whois', 'whois_command_cb', '')
     -- TODO
-    -- /whois
     -- /ban
     -- /names
     -- Lazyload messages instead of HUGE initialSync
