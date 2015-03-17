@@ -10,6 +10,21 @@
  It is known to be able to crash WeeChat in certain scenarioes so all
  usage of this script is at your own risk.
 
+ If at any point there seems to be problem, make sure you update to
+ the latest version of this script. You can also try reloading the
+ script using /lua reload matrix to refresh all the state.
+
+Power Levels
+------------
+
+A default Matrix room has power level between 0 to 100.
+This script maps this as follows:
+
+ ~ Room creator
+ & Power level 100
+ @ Power level 50
+ + Power level > 0
+
 ]]
 
 
@@ -70,6 +85,8 @@ local function dbg(message)
 end
 
 local function perr(message)
+    -- Print error message to the matrix "server" buffer using WeeChat styled
+    -- error message
     mprint(
         SERVER.errprefix_c ..
         SERVER.errprefix ..
@@ -212,11 +229,22 @@ function matrix_command_cb(data, current_buffer, args)
 end
 
 local function http(url, post, cb, timeout, extra)
+    if not post then
+        post = {}
+    end
+    if not cb then
+        cb = 'http_cb'
+    end
     if not timeout then
         timeout = 60*1000
     end
     if not extra then
         extra = ''
+    end
+
+    -- Add accept encoding by default if it's not already there
+    if not post.accept_encoding then
+        post.accept_encoding = 'application/json'
     end
 
     local homeserver_url = w.config_get_plugin('homeserver_url')
@@ -411,7 +439,7 @@ function http_cb(data, command, rc, stdout, stderr)
                     limit = 10,
                 })
                 http(('/rooms/%s/initialSync?%s'):format(
-                    urllib.quote(js.room_id), data), {}, 'http_cb')
+                    urllib.quote(js.room_id), data))
             end
         elseif command:find'leave' then
             -- We store room_id in data
@@ -475,7 +503,7 @@ MatrixServer.create = function()
      server.polling = false
      server.connected = false
      server.rooms = {}
-      -- Store user presences here since they are not local to the rooms
+     -- Store user presences here since they are not local to the rooms
      server.presence = {}
      server.end_token = 'END'
      server.typing_time = os.time()
@@ -493,15 +521,6 @@ function MatrixServer:UpdatePresence(c)
     for id, room in pairs(self.rooms) do
         room:UpdatePresence(c.user_id, c.presence)
     end
-end
-
-
-function MatrixServer:_getPost(post)
-    local extra = {
-        accept_encoding= 'application/json',
-        postfields= json.encode(post)
-    }
-    return extra
 end
 
 function MatrixServer:findRoom(buffer_ptr)
@@ -530,7 +549,9 @@ function MatrixServer:connect()
             ["password"]=password
         }
         -- Set a short timeout so user can get more immidiate feedback
-        http('/login', self:_getPost(post), 'http_cb', 5*1000)
+        http('/login', {
+                postfields = json.encode(post)
+            }, 'http_cb', 5*1000)
     end
 end
 
@@ -544,10 +565,10 @@ function MatrixServer:initial_sync()
         w.config_get_plugin'homeserver_url'))
     w.buffer_set(BUFFER, "display", "auto")
     local data = urllib.urlencode({
-        access_token= self.access_token,
-        limit= w.config_get_plugin('backlog_lines'),
+        access_token = self.access_token,
+        limit = w.config_get_plugin('backlog_lines'),
     })
-    http('/initialSync?'..data, {}, 'http_cb')
+    http('/initialSync?'..data)
 end
 
 function MatrixServer:getMessages(room_id)
@@ -558,7 +579,7 @@ function MatrixServer:getMessages(room_id)
         limit = w.config_get_plugin('backlog_lines'),
     })
     http(('/rooms/%s/messages?%s')
-        :format(urllib.quote(room_id), data), {}, 'http_cb')
+        :format(urllib.quote(room_id), data))
 end
 
 function MatrixServer:join(room)
@@ -570,7 +591,7 @@ function MatrixServer:join(room)
     mprint('\tJoining room '..room)
     room = urllib.quote(room)
     http('/join/' .. room,
-        {postfields= "access_token="..self.access_token}, 'http_cb')
+        {postfields = "access_token="..self.access_token})
 end
 
 function MatrixServer:part(room)
@@ -584,7 +605,7 @@ function MatrixServer:part(room)
         access_token= self.access_token,
     })
     -- TODO: close buffer, delete data, etc
-    http(('/rooms/%s/leave?%s'):format(id, data), {postfields= "{}"},
+    http(('/rooms/%s/leave?%s'):format(id, data), {postfields = "{}"},
         'http_cb', 10000, room.identifier)
 end
 
@@ -599,7 +620,7 @@ function MatrixServer:poll()
         timeout = 1000*30,
         from = self.end_token
     })
-    http('/events?'..data, {}, 'poll_cb')
+    http('/events?'..data, nil, 'poll_cb')
 end
 
 function MatrixServer:addRoom(room)
@@ -683,8 +704,7 @@ function send(data, calls)
         body = table.concat(body, '\n')
 
         local data = {
-            accept_encoding = 'application/json',
-            postfields= {
+            postfields = {
                 msgtype = msgtype,
                 body = body,
         }}
@@ -704,8 +724,7 @@ function send(data, calls)
               urllib.quote(id),
               urllib.quote(SERVER.access_token)
             ),
-              data,
-              'http_cb'
+              data
             )
     end
 end
@@ -720,9 +739,8 @@ function MatrixServer:state(room_id, key, data)
           urllib.quote(key),
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
-         accept_encoding = 'application/json',
-         postfields= json.encode(data),
-        }, 'http_cb')
+         postfields = json.encode(data),
+        })
 end
 
 function MatrixServer:set_membership(room_id, userid, data)
@@ -731,9 +749,8 @@ function MatrixServer:set_membership(room_id, userid, data)
           urllib.quote(userid),
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
-         accept_encoding = 'application/json',
-         postfields= json.encode(data),
-        }, 'http_cb')
+         postfields = json.encode(data),
+        })
 end
 
 function MatrixServer:SendTypingNotice(room_id)
@@ -746,9 +763,8 @@ function MatrixServer:SendTypingNotice(room_id)
           urllib.quote(self.user_id),
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
-         accept_encoding = 'application/json',
-         postfields= json.encode(data),
-        }, 'http_cb')
+         postfields = json.encode(data),
+        })
 end
 
 function upload_cb(data, command, rc, stdout, stderr)
@@ -802,17 +818,13 @@ function MatrixServer:CreateRoom(public, alias, invites)
     http(('/createRoom?access_token=%s')
         :format(urllib.quote(self.access_token)),
         {customrequest = 'POST',
-         accept_encoding = 'application/json',
-         postfields= json.encode(data),
-        }, 'http_cb')
+         postfields = json.encode(data),
+        })
 end
 
 function MatrixServer:ListRooms()
     http(('/publicRooms?access_token=%s')
-        :format(urllib.quote(self.access_token)),
-        {
-            accept_encoding = 'application/json',
-        }, 'http_cb')
+        :format(urllib.quote(self.access_token)))
 end
 
 function MatrixServer:invite(room_id, user_id)
@@ -823,9 +835,8 @@ function MatrixServer:invite(room_id, user_id)
         :format(urllib.quote(room_id),
           urllib.quote(self.access_token)),
         {customrequest = 'POST',
-         accept_encoding = 'application/json',
-         postfields= json.encode(data),
-        }, 'http_cb')
+         postfields = json.encode(data),
+        })
 end
 
 function MatrixServer:Nick(displayname)
@@ -837,9 +848,8 @@ function MatrixServer:Nick(displayname)
           urllib.quote(self.user_id),
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
-         accept_encoding = 'application/json',
-         postfields= json.encode(data),
-        }, 'http_cb')
+         postfields = json.encode(data),
+        })
 end
 
 function buffer_input_cb(b, buffer, data)
@@ -1189,7 +1199,6 @@ function Room:formatNick(user_id)
         .. suffix
     return nick_f
 end
-
 
 -- Parses a chunk of json meant for a room
 function Room:parseChunk(chunk, backlog, chunktype)
@@ -1805,6 +1814,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- TODO
     -- /ban
     -- /names
+    -- /upload
+    -- Giving people arbitrary power levels
     -- Lazyload messages instead of HUGE initialSync
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
