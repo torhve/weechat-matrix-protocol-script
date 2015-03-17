@@ -10,6 +10,17 @@ Matrix is a new open source realtime federated chat protocol. You can read more 
 
 [http://weechat.org](WeeChat) is a super powerful CLI chat client that's extensible in many languages to allow for new protocols like Matrix.
 
+## What does it look like?
+
+
+> WeeChat in a terminal
+
+![weechat ncurses cli screenshot](https://hveem.no/ss/weechat-matrix-ss.png)
+
+> WeeChat in a relay client [http://github.com/glowing-bear](Glowing Bear)
+
+![weechat glowing bear](https://hveem.no/ss/weechat-matrix-gb.png)
+
 ## How to load and use the plugin
 
 ```bash
