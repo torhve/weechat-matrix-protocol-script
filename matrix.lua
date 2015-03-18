@@ -1331,12 +1331,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     and chunk.prev_content.membership == 'join'
                     and chunktype == 'messages' then
                 local oldnick = chunk.prev_content.displayname
-                if oldnick == json.null then
+                if not oldnick or oldnick == json.null then
                     oldnick = chunk.user_id
                 else
                     if oldnick == name then
                         -- Maybe they changed their avatar or something else
-                        -- that we don't care about
+                        -- that we don't care about (or multiple joins)
                         return
                     end
                     self:delNick(chunk.user_id)
@@ -1817,6 +1817,10 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- /upload
     -- Giving people arbitrary power levels
     -- Lazyload messages instead of HUGE initialSync
+    -- Dynamically fetch more messages in backlog when user reaches the
+    -- oldest message using pgup
+    -- Need a way to change room join rule
+    -- Fix broken state after failed initial connect
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
