@@ -39,6 +39,26 @@ weechat
 /matrix connect
 ```
 
+## Configuration
+
+Given Matrix display names can be quite long, we recommend limiting
+the size of the prefix and username lists:
+
+```
+/set weechat.look.prefix_align_max 20
+/set weechat.bar.nicklist.size 20
+```
+
+## To hot-update the plugin
+
+```bash
+git pull
+```
+
+```
+/lua reload matrix
+```
+
 ## How to get WeeChat & Lua deps up and running on Debian/Ubuntu:
 
 ```bash
