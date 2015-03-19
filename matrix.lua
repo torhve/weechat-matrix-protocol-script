@@ -703,6 +703,36 @@ function send(data, calls)
         end
         body = table.concat(body, '\n')
 
+        if w.config_get_plugin('local_echo') == 'on' then
+            -- Generate local echo
+            for _, r in pairs(SERVER.rooms) do
+                if r.identifier == id then
+                    if msgtype == 'm.text' then
+                        w.print_date_tags(r.buffer, nil,
+                            'notify_none,localecho,no_highlight', ("%s\t%s%s"):format(
+                                r:formatNick(SERVER.user_id),
+                                default_color,
+                                body
+                                )
+                            )
+                    elseif msgtype == 'm.emote' then
+                        local prefix_c = wcolor'weechat.color.chat_prefix_action'
+                        local prefix = wconf'weechat.look.prefix_action'
+                        w.print_date_tags(r.buffer, nil,
+                            'notify_none,localecho,irc_action,no_highlight', ("%s%s\t%s%s%s %s"):format(
+                                prefix_c,
+                                prefix,
+                                w.color('chat_nick_self'),
+                                r.users[SERVER.user_id],
+                                default_color,
+                                body
+                                )
+                            )
+                    end
+                end
+            end
+        end
+
         local data = {
             postfields = {
                 msgtype = msgtype,
@@ -1277,15 +1307,26 @@ function Room:parseChunk(chunk, backlog, chunktype)
             body = ("%s%s %s%s"):format(
                 nick_c, nick, color, content['body']
             )
-            local data = ("%s%s\t%s"):format(
-                prefix_c,
-                prefix,
-                body)
-            return w.print_date_tags(self.buffer, time_int, tags(),data)
+            local prefix = prefix_c .. prefix
+            local data = ("%s\t%s"):format(prefix, body)
+            if not backlog and is_self
+                -- TODO better check, to work for multiple weechat clients
+              and w.config_get_plugin('local_echo') == 'on' then
+                -- We have already locally echoed this line
+                return
+            else
+                return w.print_date_tags(self.buffer, time_int, tags(), data)
+            end
         else
             body = content['body']
             perr 'Uknown content type'
             dbg(content)
+        end
+        if not backlog and is_self
+          -- TODO better check, to work for multiple weechat clients
+          and w.config_get_plugin('local_echo') == 'on' then
+            -- We have already locally echoed this line
+            return
         end
         local data = ("%s\t%s%s"):format(
                 self:formatNick(chunk.user_id),
@@ -1782,6 +1823,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         backlog_lines= {'120', 'Number of lines to fetch from backlog upon connecting'},
         autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
+        local_echo = {'on', 'Print lines locally instead of waiting for resturn from server'},
     }
     -- set default settings
     local version = w.info_get('version_number', '') or 0
@@ -1821,6 +1863,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- oldest message using pgup
     -- Need a way to change room join rule
     -- Fix broken state after failed initial connect
+    -- Fix parsing of kick messages
+    -- Fix parsing of multiple join messages
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
