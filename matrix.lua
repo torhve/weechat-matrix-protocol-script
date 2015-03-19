@@ -763,6 +763,10 @@ function MatrixServer:emote(room_id, body)
     self:msg(room_id, body, 'm.emote')
 end
 
+function MatrixServer:notice(room_id, body)
+    self:msg(room_id, body, 'm.notice')
+end
+
 function MatrixServer:state(room_id, key, data)
     http(('/rooms/%s/state/%s?access_token=%s')
         :format(urllib.quote(room_id),
@@ -960,6 +964,10 @@ end
 
 function Room:emote(msg)
     SERVER:emote(self.identifier, msg)
+end
+
+function Room:Notice(msg)
+    SERVER:notice(self.identifier, msg)
 end
 
 function Room:SendTypingNotice()
@@ -1784,6 +1792,18 @@ function whois_command_cb(data, current_buffer, args)
     end
 end
 
+function notice_command_cb(data, current_buffer, args)
+    -- TODO sending from matrix buffer given a room name
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, msg = split_args(args)
+        room:Notice(msg)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1853,10 +1873,12 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/invite', 'invite_command_cb', '')
     w.hook_command_run('/nick', 'nick_command_cb', '')
     w.hook_command_run('/whois', 'whois_command_cb', '')
+    w.hook_command_run('/notice', 'notice_command_cb', '')
     -- TODO
     -- /ban
     -- /names
     -- /upload
+    -- /msg
     -- Giving people arbitrary power levels
     -- Lazyload messages instead of HUGE initialSync
     -- Dynamically fetch more messages in backlog when user reaches the
