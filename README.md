@@ -39,6 +39,27 @@ weechat
 /matrix connect
 ```
 
+When it connects it will create a WeeChat buffer called matrix that will act
+like the "server" buffer. Some errors messages and status messages will appear
+in there on certain events like joing/invite/connection problems/etc. It will
+also create buffers for any rooms that you have already join on this or any
+other client.
+
+Most IRC commands you would expect work exists, like /join /query /part /kick
+/op /voice /notice, etc. There might be slight differences from normal usage.
+
+There's a /create room name to create a new room with a given name.
+
+If at any point you get any errors you can always try reloading the script to
+refresh the state by issuing the command
+
+```
+/lua reload matrix
+```
+
+If you get invited to a room, the script will autojoin, which is configurable
+behaviour.
+
 ## Configuration
 
 Given Matrix display names can be quite long, we recommend limiting
