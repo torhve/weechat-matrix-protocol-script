@@ -4,11 +4,11 @@ This script is considered beta quality as not all functionality is in place and 
 
 ## What is Matrix ?
 
-Matrix is a new open source realtime federated chat protocol. You can read more about it on [http://matrix.org/blog/faq/](their website).
+Matrix is a new open source realtime federated chat protocol. You can read more about it on [their website](http://matrix.org/blog/faq/).
 
 ## What is WeeChat ?
 
-[http://weechat.org](WeeChat) is a super powerful CLI chat client that's extensible in many languages to allow for new protocols like Matrix.
+[WeeChat](http://weechat.org) is a super powerful CLI chat client that's extensible in many languages to allow for new protocols like Matrix.
 
 ## What does it look like?
 
