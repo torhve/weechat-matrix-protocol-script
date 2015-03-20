@@ -703,6 +703,9 @@ function send(data, calls)
         end
         body = table.concat(body, '\n')
 
+        -- Run IRC modifiers (XXX: maybe run out1 also?
+        body = w.hook_modifier_exec('irc_out1_PRIVMSG', '', body)
+
         if w.config_get_plugin('local_echo') == 'on' then
             -- Generate local echo
             for _, r in pairs(SERVER.rooms) do
