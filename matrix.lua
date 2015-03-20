@@ -449,7 +449,7 @@ function http_cb(data, command, rc, stdout, stderr)
             -- We store room_id in data
             local room_id = data
             if js.content_uri then
-                SERVER:msg(room_id, js.content_uri)
+                SERVER:Msg(room_id, js.content_uri)
             end
         elseif command:find'/typing/' then
             -- either it errs or it is empty
@@ -644,7 +644,7 @@ function MatrixServer:delRoom(room_id)
     end
 end
 
-function MatrixServer:msg(room_id, body, msgtype)
+function MatrixServer:Msg(room_id, body, msgtype)
     -- check if there's an outgoing message timer already
     self:ClearSendTimer()
 
@@ -760,11 +760,11 @@ function send(data, calls)
 end
 
 function MatrixServer:emote(room_id, body)
-    self:msg(room_id, body, 'm.emote')
+    self:Msg(room_id, body, 'm.emote')
 end
 
 function MatrixServer:notice(room_id, body)
-    self:msg(room_id, body, 'm.notice')
+    self:Msg(room_id, body, 'm.notice')
 end
 
 function MatrixServer:state(room_id, key, data)
@@ -889,7 +889,7 @@ end
 function buffer_input_cb(b, buffer, data)
     for r_id, room in pairs(SERVER.rooms) do
         if buffer == room.buffer then
-            SERVER:msg(r_id, data)
+            SERVER:Msg(r_id, data)
         end
     end
     return w.WEECHAT_RC_OK
@@ -958,8 +958,8 @@ function Room:upload(filename)
     SERVER:upload(self.identifier, filename)
 end
 
-function Room:msg(msg)
-    SERVER:msg(self.identifier, msg)
+function Room:Msg(msg)
+    SERVER:Msg(self.identifier, msg)
 end
 
 function Room:emote(msg)
@@ -1804,6 +1804,35 @@ function notice_command_cb(data, current_buffer, args)
     end
 end
 
+function msg_command_cb(data, current_buffer, args)
+    local _, args = split_args(args)
+    local mask, msg = split_args(args)
+    local room
+    dbg{mask=mask,msg=msg}
+    -- WeeChat uses * as a mask for current buffer
+    if mask == '*' then
+        room = SERVER:findRoom(current_buffer)
+    else
+        for id, r in pairs(SERVER.rooms) do
+            -- Send /msg to a ID
+            if id == mask then
+                room = r
+                break
+            elseif mask == r.name then
+                room = r
+                break
+            end
+        end
+    end
+
+    if room then
+        room:Msg(msg)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1874,6 +1903,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command_run('/nick', 'nick_command_cb', '')
     w.hook_command_run('/whois', 'whois_command_cb', '')
     w.hook_command_run('/notice', 'notice_command_cb', '')
+    w.hook_command_run('/msg', 'msg_command_cb', '')
     -- TODO
     -- /ban
     -- /names
