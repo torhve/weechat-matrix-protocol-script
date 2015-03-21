@@ -25,6 +25,19 @@ This script maps this as follows:
  @ Power level 50
  + Power level > 0
 
+ TODO
+ ----
+ /ban
+ /names
+ /upload
+ Giving people arbitrary power levels
+ Lazyload messages instead of HUGE initialSync
+ Dynamically fetch more messages in backlog when user reaches the
+ oldest message using pgup
+ Need a way to change room join rule
+ Fix broken state after failed initial connect
+ Fix parsing of kick messages
+ Fix parsing of multiple join messages
 ]]
 
 
@@ -1634,7 +1647,11 @@ function part_command_cb(data, current_buffer, args)
     end
 end
 
-function emote_command_cb(data, current_buffer, args)
+function leave_command_cb(data, current_buffer, args)
+    return part_command_cb(data, current_buffer, args)
+end
+
+function me_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
         local _, args = split_args(args)
@@ -1811,7 +1828,6 @@ function msg_command_cb(data, current_buffer, args)
     local _, args = split_args(args)
     local mask, msg = split_args(args)
     local room
-    dbg{mask=mask,msg=msg}
     -- WeeChat uses * as a mask for current buffer
     if mask == '*' then
         room = SERVER:findRoom(current_buffer)
@@ -1888,40 +1904,19 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
                      value[2], value[1]))
         end
     end
-    w.hook_command_run('/join', 'join_command_cb', '')
-    w.hook_command_run('/part', 'part_command_cb', '')
-    w.hook_command_run('/leave', 'part_command_cb', '')
-    w.hook_command_run('/me', 'emote_command_cb', '')
-    w.hook_command_run('/topic', 'topic_command_cb', '')
-    w.hook_command_run('/upload', 'upload_command_cb', '')
-    w.hook_command_run('/query', 'query_command_cb', '')
-    w.hook_command_run('/list', 'list_command_cb', '')
-    w.hook_command_run('/op', 'op_command_cb', '')
-    w.hook_command_run('/voice', 'voice_command_cb', '')
-    w.hook_command_run('/deop', 'deop_command_cb', '')
-    w.hook_command_run('/devoice', 'devoice_command_cb', '')
-    w.hook_command_run('/kick', 'kick_command_cb', '')
-    w.hook_command_run('/create', 'create_command_cb', '')
-    w.hook_command_run('/invite', 'invite_command_cb', '')
-    w.hook_command_run('/nick', 'nick_command_cb', '')
-    w.hook_command_run('/whois', 'whois_command_cb', '')
-    w.hook_command_run('/notice', 'notice_command_cb', '')
-    w.hook_command_run('/msg', 'msg_command_cb', '')
-    -- TODO
-    -- /ban
-    -- /names
-    -- /upload
-    -- Giving people arbitrary power levels
-    -- Lazyload messages instead of HUGE initialSync
-    -- Dynamically fetch more messages in backlog when user reaches the
-    -- oldest message using pgup
-    -- Need a way to change room join rule
-    -- Fix broken state after failed initial connect
-    -- Fix parsing of kick messages
-    -- Fix parsing of multiple join messages
+    local commands = {
+        'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
+        'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'invite', 'nick',
+        'whois', 'notice', 'msg'
+    }
+    for _, c in pairs(commands) do
+        w.hook_command_run('/'..c, c..'_command_cb', '')
+    end
+
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
+
     local cmds = {'help', 'connect'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
         '[command] [command options]',
