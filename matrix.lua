@@ -1911,7 +1911,6 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     -- /ban
     -- /names
     -- /upload
-    -- /msg
     -- Giving people arbitrary power levels
     -- Lazyload messages instead of HUGE initialSync
     -- Dynamically fetch more messages in backlog when user reaches the
