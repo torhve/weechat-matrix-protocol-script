@@ -1858,6 +1858,12 @@ function closed_matrix_buffer_cb(data, buffer)
 end
 
 function closed_matrix_room_cb(data, buffer)
+    -- WeeChat closed our room
+    local room = SERVER:findRoom(buffer)
+    if room then
+        SERVER.rooms[room] = nil
+        return w.WEECHAT_RC_OK
+    end
     return w.WEECHAT_RC_ERR
 end
 
