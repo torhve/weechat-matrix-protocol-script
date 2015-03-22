@@ -300,25 +300,30 @@ function poll_cb(data, command, rc, stdout, stderr)
                 SERVER.end_token = js['end']
             end
             for _, chunk in pairs(js.chunk or {}) do
-                 if chunk.room_id then
+                if chunk.room_id then
                     local room = SERVER.rooms[chunk['room_id']]
                     if room then
                         room:parseChunk(chunk, false, 'messages')
-                else
-                    -- Chunk for non-existing room, maybe we just got
-                        -- invited, so lets create a room
+                    else
+                        -- Chunk for non-existing room, maybe we just got
+                            -- invited, so lets create a room
                         if (chunk.content and chunk.content.membership and
-                              chunk.content.membership == 'invite') -- or maybe we just created a new room ourselves
-                              or chunk['type'] == 'm.room.create'
-                              then
+                          chunk.content.membership == 'invite') -- or maybe we just created a new room ourselves
+                          or chunk['type'] == 'm.room.create'
+                          then
                             local newroom = SERVER:addRoom(chunk)
                             newroom:parseChunk(chunk, false, 'messages')
                         elseif chunk.content and chunk.content.membership and
                               chunk.content.membership == 'leave' then
                               -- Ignore leave events
+                        elseif chunk.type and chunk.type == 'm.typing' then
+                            -- Ignore typing events for unknown rooms
                         else
+                            -- Maybe user closed the buffer? Recreate.
+                            local newroom = SERVER:addRoom(chunk)
+                            newroom:parseChunk(chunk, false, 'messages')
 
-                            dbg{err='Event for unknown room',event=chunk}
+                            perr('Event for unknown room... Recreating buffer. Try /lua reload matrix to refresh all state')
                         end
                     end
                 elseif chunk.type == 'm.presence' then
@@ -991,27 +996,23 @@ function Room:SendTypingNotice()
 end
 
 function Room:create_buffer()
-    local buffer = w.buffer_search("", ("%s.%s"):format(self.server, self.name))
-    if buffer ~= '' then
-        self.buffer = buffer
-    else
-        self.buffer = w.buffer_new(("%s.%s")
-            :format(self.server, self.name), "buffer_input_cb",
-            self.name, "closed_matrix_room_cb", "")
-        self.nicklist_groups = {
-            -- Emulate OPs
-            w.nicklist_add_group(self.buffer,
-                '', "000|o", "weechat.color.nicklist_group", 1),
-            -- Emulate half-op
-            w.nicklist_add_group(self.buffer,
-                '', "001|v", "weechat.color.nicklist_group", 1),
-            -- Defined in weechat's irc-nick.h
-            w.nicklist_add_group(self.buffer,
-                '', "998|...", "weechat.color.nicklist_group", 1),
-            w.nicklist_add_group(self.buffer,
-                '', "999|...", "weechat.color.nicklist_group", 1),
-        }
-    end
+    --local buffer = w.buffer_search("", ("%s.%s"):format(self.server, self.name))
+    self.buffer = w.buffer_new(("%s.%s")
+        :format(self.server, self.name), "buffer_input_cb",
+        self.name, "closed_matrix_room_cb", "")
+    self.nicklist_groups = {
+        -- Emulate OPs
+        w.nicklist_add_group(self.buffer,
+            '', "000|o", "weechat.color.nicklist_group", 1),
+        -- Emulate half-op
+        w.nicklist_add_group(self.buffer,
+            '', "001|v", "weechat.color.nicklist_group", 1),
+        -- Defined in weechat's irc-nick.h
+        w.nicklist_add_group(self.buffer,
+            '', "998|...", "weechat.color.nicklist_group", 1),
+        w.nicklist_add_group(self.buffer,
+            '', "999|...", "weechat.color.nicklist_group", 1),
+    }
     w.buffer_set(self.buffer, "nicklist", "1")
     w.buffer_set(self.buffer, "nicklist_display_groups", "0")
     w.buffer_set(self.buffer, "localvar_set_server", self.server)
@@ -1861,7 +1862,9 @@ function closed_matrix_room_cb(data, buffer)
     -- WeeChat closed our room
     local room = SERVER:findRoom(buffer)
     if room then
-        SERVER.rooms[room] = nil
+        room.buffer = nil
+        perr('Room got closed: '..room.name)
+        SERVER.rooms[room.identifier] = nil
         return w.WEECHAT_RC_OK
     end
     return w.WEECHAT_RC_ERR
