@@ -882,7 +882,7 @@ function MatrixServer:ListRooms()
         :format(urllib.quote(self.access_token)))
 end
 
-function MatrixServer:invite(room_id, user_id)
+function MatrixServer:Invite(room_id, user_id)
     local data = {
         user_id = user_id
     }
@@ -1647,8 +1647,8 @@ function Room:Whois(nick)
     end
 end
 
-function Room:invite(id)
-    SERVER:invite(self.identifier, id)
+function Room:Invite(id)
+    SERVER:Invite(self.identifier, id)
 end
 
 function poll(a,b)
@@ -1765,7 +1765,7 @@ function invite_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
         local _, args = split_args(args)
-        room:invite(args)
+        room:Invite(args)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
