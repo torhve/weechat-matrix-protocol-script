@@ -1226,6 +1226,40 @@ function Room:delNick(id)
     end
 end
 
+function Room:UpdateLine(id, message)
+    local lines = w.hdata_pointer(w.hdata_get('buffer'), self.buffer, 'own_lines')
+    if lines == '' then return end
+    local line = w.hdata_pointer(w.hdata_get('lines'), lines, 'last_line')
+    if line == '' then return end
+    local hdata_line = w.hdata_get('line')
+    local hdata_line_data = w.hdata_get('line_data')
+    while #line > 0 do
+        local needsupdate = false
+        local data = w.hdata_pointer(hdata_line, line, 'data')
+        local tags = {}
+        local tag_count = w.hdata_integer(hdata_line_data, data, "tags_count")
+        if tag_count > 0 then
+            for i = 0, tag_count-1 do
+                local tag = w.hdata_string(hdata_line_data, data, i .. "|tags_array")
+                tags[#tags+1] = tag
+                if tag:match(id) then
+                    needsupdate = true
+                end
+            end
+            if needsupdate then
+                w.hdata_update(hdata_line_data, data, {
+                    prefix = prefix,
+                    message = message,
+                    tags_array = table.concat(tags, ','),
+                    })
+                return true
+            end
+        end
+        line = w.hdata_move(hdata_line, line, -1)
+    end
+    return false
+end
+
 function Room:formatNick(user_id)
     -- Turns a nick name into a weechat-styled nickname. This means giving
     -- it colors, and proper prefix and suffix
@@ -1290,6 +1324,10 @@ function Room:parseChunk(chunk, backlog, chunktype)
         is_self = true
         tag{'no_highlight','notify_none'}
     end
+
+    -- Add Event ID to each line so can use it later to match on for things
+    -- like redactions and localecho, etc
+    tag{chunk.event_id}
 
     if chunk['type'] == 'm.room.message' then
         if not backlog and not is_self then
@@ -1513,6 +1551,13 @@ function Room:parseChunk(chunk, backlog, chunktype)
         -- Use first alias, weechat doesn't really support multiple  aliases
         self.aliases = chunk.content.aliases
         self:setName(chunk.content.aliases[1])
+    elseif chunk['type'] == 'm.room.redaction' then
+        local redact_id = chunk.redacts
+        perr('Redacting message ' .. redact_id)
+        local result = self:UpdateLine(redact_id, w.color'darkgray'..'(redacted)')
+        if not result then
+            perr 'Could not find message to redact :('
+        end
     else
         perr(('Unknown chunk type %s%s%s in room %s%s%s'):format(
             w.color'bold',
