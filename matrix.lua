@@ -477,6 +477,7 @@ function http_cb(data, command, rc, stdout, stderr)
             --dbg({state= js})
         elseif command:find'/send/' then
             -- XXX Errorhandling
+            -- TODO save event id to use for localecho
         elseif command:find'createRoom' then
             local room_id = js.room_id
             -- We get join events, so we don't have to do anything
@@ -935,7 +936,7 @@ Room.create = function(obj)
     local state_events = obj.state or {}
     for _, state in pairs(state_events) do
         if state['type'] == 'm.room.aliases' then
-            local name = state['content']['aliases'][1]
+            local name = state['content']['aliases'][1] or ''
             room.name, room.server = name:match('(.+):(.+)')
         end
     end
