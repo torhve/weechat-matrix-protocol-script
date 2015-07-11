@@ -1382,9 +1382,19 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 return w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         else
-            body = content['body']
-            perr 'Uknown content type'
-            dbg(content)
+            -- Unknown content type, but if it contains an URL we will print
+            -- URL and body
+            local url = content['url']
+            if url ~= nil then
+                url = url:gsub('mxc://',
+                    w.config_get_plugin('homeserver_url')
+                    .. '_matrix/media/v1/download/')
+                body = content['body'] .. ' ' .. url
+            end
+            dbg {
+                warning='Warning: unknown/unhandled content type',
+                event=content
+            }
         end
         if not backlog and is_self
           -- TODO better check, to work for multiple weechat clients
