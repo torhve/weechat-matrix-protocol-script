@@ -1532,6 +1532,20 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 )
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             end
+        elseif chunk['content']['membership'] == 'ban' then
+            if chunktype == 'messages' then
+                tag"irc_ban"
+                local time_int = chunk['origin_server_ts']/1000
+                local prefix_c = wcolor'weechat.color.chat_prefix_action'
+                local prefix = wconf'weechat.look.prefix_action'
+                local data = ("%s%s\t%s banned %s"):format(
+                    prefix_c,
+                    prefix,
+                    self.users[chunk.user_id] or chunk.user_id,
+                    self.users[chunk.state_key] or chunk.state_key
+                )
+                w.print_date_tags(self.buffer, time_int, tags(), data)
+            end
         else
             dbg{err= 'unknown membership type in parseChunk', chunk= chunk}
         end
