@@ -40,13 +40,13 @@ This script maps this as follows:
  Fix parsing of multiple join messages
 ]]
 
-
 local json = require 'cjson' -- apt-get install lua-cjson
+local olmstatus, olm = pcall(require, 'olm') -- LuaJIT olm FFI binding ln -s ~/olm/olm.lua /usr/local/share/lua/5.1
 local w = weechat
 
 local SCRIPT_NAME = "matrix"
 local SCRIPT_AUTHOR = "xt <xt@xt.gg>"
-local SCRIPT_VERSION = "1"
+local SCRIPT_VERSION = "2"
 local SCRIPT_LICENSE = "MIT"
 local SCRIPT_DESC = "Matrix.org chat plugin"
 local SCRIPT_COMMAND = SCRIPT_NAME
@@ -57,9 +57,33 @@ local OUT = {}
 local BUFFER
 local Room
 local MatrixServer
+local DEBUG = false -- TODO: make /matrix debug to toggle
+local POLL_INTERVAL = 360
 
 local default_color = w.color('default')
+-- Cache error variables so we don't have to look them up for every error
+-- message, a normal user will not change these ever anyway.
+local errprefix
+local errprefix_c
 
+local homedir
+local ALGO = 'm.olm.v1.curve25519-aes-sha2'
+local OLM_KEY = 'secr3t' -- TODO configurable using weechat sec data
+local v2_api_ns = '_matrix/client/v2_alpha'
+
+local dtraceback = debug.traceback
+debug.traceback = function (...)
+    if select('#', ...) >= 1 then
+        local err, lvl = ...
+        local trace = dtraceback(err, (lvl or 2)+1)
+        perr(trace)
+    end
+    -- direct call to debug.traceback: return the original.
+    -- debug.traceback(nil, level) doesn't work in Lua 5.1
+    -- (http://lua-users.org/lists/lua-l/2011-06/msg00574.html), so
+    -- simply remove first frame from the stack trace
+    return (dtraceback(...):gsub("(stack traceback:\n)[^\n]*\n", "%1"))
+end
 local function tprint(tbl, indent, out)
     if not indent then indent = 0 end
     for k, v in pairs(tbl) do
@@ -87,26 +111,31 @@ local function mprint(message)
     end
 end
 
+local function werr(message)
+    --write error message to core buffer
+    if message == nil then return end
+end
+local function perr(message)
+    if message == nil then return end
+    -- Print error message to the matrix "server" buffer using WeeChat styled
+    -- error message
+    mprint(
+        errprefix_c ..
+        errprefix ..
+        '\t' ..
+        default_color ..
+        tostring(message)
+        )
+end
+
 local function dbg(message)
-    mprint('________')
+    perr('- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -')
     if type(message) == 'table' then
         tprint(message)
     else
         message = ("DEBUG: %s"):format(tostring(message))
         mprint(BUFFER, message)
     end
-end
-
-local function perr(message)
-    -- Print error message to the matrix "server" buffer using WeeChat styled
-    -- error message
-    mprint(
-        SERVER.errprefix_c ..
-        SERVER.errprefix ..
-        '\t' ..
-        default_color ..
-        tostring(message)
-        )
 end
 
 local function weechat_eval(text)
@@ -134,6 +163,29 @@ urllib.urlencode = function(tbl)
         table.insert(out, urllib.quote(k)..'='..urllib.quote(v))
     end
     return table.concat(out, '&')
+end
+
+local function sign_json(json_object, signing_key, signing_name)
+    -- See: https://github.com/matrix-org/matrix-doc/blob/master/specification/31_event_signing.rst
+    local signatures = json_object.signatures or {}
+    json_object.signatures = nil
+
+    local unsigned = json_object.unsigned or nil
+    json_object.unsigned = nil
+
+    -- TODO ensure canonical json
+    local signed = signing_key:sign(json.encode(json_object))
+    local signature_base64 = encode_base64(signed.signature)
+
+    local key_id = ("%s:%s"):format(signing_key.agl, signing_key.version)
+    signatures[signing_name] = {[key_id] = signature_base64}
+
+    json_object.signatures = signatures
+    if unsigned then
+        json_object.unsigned = unsigned
+    end
+
+    return json_object
 end
 
 local function split_args(args)
@@ -194,7 +246,19 @@ local function strip_irc_formatting(s)
         :gsub("\31", ""))
 end
 
-function unload()
+function matrix_unload()
+    w.print('', 'Unloading')
+    -- Clear/free olm memory if loaded
+    if olmstatus then
+        w.print('', 'Saving olm state')
+        SERVER.olm.save()
+        w.print('', 'Clearing olm state from memory')
+        --perr(SERVER.olm.session:clear())
+        perr(SERVER.olm.account:clear())
+        --SERVER.olm = nil
+        --olm = nil -- Explict niling of this prevents SIGSEG with luajit
+    end
+    w.print('', 'Done')
     return w.WEECHAT_RC_OK
 end
 
@@ -232,16 +296,22 @@ end
 function matrix_command_cb(data, current_buffer, args)
     if args == 'connect' then
         return command_connect(current_buffer, arg)
+    elseif args == 'debug' then
+        if DEBUG then
+            DEBUG = false
+            w.print('', SCRIPT_NAME..': debugging messages disabled')
+        else
+            DEBUG = true
+            w.print('', SCRIPT_NAME..': debugging messages enabled')
+        end
+    else
+        perr("Command not found: " .. args)
     end
-    --local command = cmds[function_name](current_buffer, args)
-    --if not command then
-    --    w.print("", "Command not found: " .. function_name)
-    --end
 
     return w.WEECHAT_RC_OK
 end
 
-local function http(url, post, cb, timeout, extra)
+local function http(url, post, cb, timeout, extra, api_ns)
     if not post then
         post = {}
     end
@@ -252,7 +322,10 @@ local function http(url, post, cb, timeout, extra)
         timeout = 60*1000
     end
     if not extra then
-        extra = ''
+        extra = nil
+    end
+    if not api_ns then
+        api_ns = "_matrix/client/api/v1"
     end
 
     -- Add accept encoding by default if it's not already there
@@ -261,8 +334,11 @@ local function http(url, post, cb, timeout, extra)
     end
 
     local homeserver_url = w.config_get_plugin('homeserver_url')
-    homeserver_url = homeserver_url .. "_matrix/client/api/v1"
+    homeserver_url = homeserver_url .. api_ns
     url = homeserver_url .. url
+    if DEBUG then
+        dbg{request={url=url,post=post,extra=extra}}
+    end
     w.hook_process_hashtable('url:' .. url, post, timeout, cb, extra)
 end
 
@@ -291,6 +367,9 @@ function poll_cb(data, command, rc, stdout, stderr)
             -- case of errors. This will make the polltimer kick in in 30
             -- seconds or so
             return w.WEECHAT_RC_OK
+        end
+        if DEBUG then
+            dbg{reply={command=command,js=js}}
         end
         if js['errcode'] then
             perr(js.errcode)
@@ -347,8 +426,7 @@ function poll_cb(data, command, rc, stdout, stderr)
     return w.WEECHAT_RC_OK
 end
 
-
-function http_cb(data, command, rc, stdout, stderr)
+function real_http_cb(data, command, rc, stdout, stderr)
     if stderr ~= '' then
         mprint(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
@@ -370,6 +448,9 @@ function http_cb(data, command, rc, stdout, stderr)
             mprint(('error\t%s during json load: %s'):format(js, stdout))
             js = {}
             return w.WEECHAT_RC_OK
+        end
+        if DEBUG then
+            dbg{reply={command=command,js=js}}
         end
         if js['errcode'] then
             if command:find'login' then
@@ -435,7 +516,10 @@ function http_cb(data, command, rc, stdout, stderr)
             SERVER:poll()
             -- Timer used in cased of errors to restart the polling cycle
             -- During normal operation the polling should re-invoke itself
-            SERVER.polltimer = w.hook_timer(30*1000, 0, 0, "polltimer_cb", "")
+            SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
+            if olmstatus then -- Upload keys
+                SERVER.olm.upload_keys()
+            end
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
@@ -463,6 +547,27 @@ function http_cb(data, command, rc, stdout, stderr)
             -- We store room_id in data
             local room_id = data
             SERVER:delRoom(room_id)
+        elseif command:find'/keys/take' then
+            local count = 0
+            for user_id, v in pairs(js.one_time_keys or {}) do
+                for device_id, keys in pairs(v or {}) do
+                    for key_id, key in pairs(keys or {}) do
+                        SERVER.olm.otks[user_id] = {[device_id]=key}  -- TODO support more than one
+                        perr(('olm: Recieved OTK for user %s for device id %s'):format(user_id, device_id))
+                        count = count + 1
+                    end
+                end
+            end
+        elseif command:find'/keys/query' then
+            for k, v in pairs(js.device_keys or {}) do
+                SERVER.olm.device_keys[k] = v
+                -- Claim keys for all
+                SERVER.olm.claim(k)
+            end
+        elseif command:find'/keys/upload' then
+            local key_count = js.one_time_key_counts[ALGO]
+            SERVER.olm.key_count = key_count
+            perr('olm: Number of own OTKs uploaded to server: '..key_count)
         elseif command:find'upload' then
             -- We store room_id in data
             local room_id = data
@@ -499,8 +604,8 @@ function http_cb(data, command, rc, stdout, stderr)
         elseif command:find'/invite' then
             local room_id = js.room_id
         else
-            dbg{['error'] = 'Unknown command in http cb', command=command,
-                js=js}
+            dbg{['error'] = {msg='Unknown command in http cb', command=command,
+                js=js}}
         end
     end
     if tonumber(rc) == -2 then
@@ -509,6 +614,10 @@ function http_cb(data, command, rc, stdout, stderr)
     end
 
     return w.WEECHAT_RC_OK
+end
+function http_cb(data, command, rc, stdout, stderr)
+    local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
+    return result
 end
 
 MatrixServer = {}
@@ -528,10 +637,136 @@ MatrixServer.create = function()
      server.typing_time = os.time()
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
 
-     -- Cache error variables so we don't have to look them up for every error
-     -- message, a normal user will not change these ever anyway.
-     server.errprefix = wconf'weechat.look.prefix_error'
-     server.errprefix_c = wcolor'weechat.color.chat_prefix_error'
+     if olmstatus then -- check if encryption is available
+         -- FIXME configurable key using weechat sec data
+         local account = olm.Account.new()
+         local device_id = homedir:gsub('/', ''):gsub('%.', '') -- use weechat homedir as unique id
+         local olmdata = {
+             account=account,
+             sessions={},
+             device_keys={},
+             device_id = device_id,
+             otks={}
+         }
+         olmdata.save = function()
+             local pickle, err = account:pickle(OLM_KEY)
+             perr(err)
+             local fd = io.open(homedir..'account.olm', 'wb')
+             fd:write(pickle)
+             fd:close()
+         end
+         olmdata.query = function(user_ids) -- Query keys from other user_id
+             if DEBUG then
+                 perr('olm: querying user_ids')
+                 tprint(user_ids)
+             end
+             local auth = urllib.urlencode{access_token=SERVER.access_token}
+             local data = {
+                 device_keys = {}
+             }
+             for _,uid in pairs(user_ids) do
+                 data.device_keys[uid] = false
+             end
+             http('/keys/query/?'..auth,
+                {postfields=json.encode(data)},
+                'http_cb',
+                5*1000, nil,
+                v2_api_ns )
+         end
+         olmdata.upload_keys = function()
+             if DEBUG then
+                 perr('olm: Uploading keys')
+             end
+             local id_keys = json.decode(account:identity_keys())
+             local user_id = SERVER.user_id
+             local one_time_keys = {}
+             local otks = json.decode(account:one_time_keys())
+             local keyCount = 0
+             for id, k in pairs(otks.curve25519) do
+                 keyCount = keyCount + 1
+             end
+             if keyCount < 5 then -- try to always have 5 keys
+                 account:generate_one_time_keys(5 - keyCount)
+             end
+             for id, k in pairs(otks.curve25519) do
+                 one_time_keys[ALGO..':'..id] = k
+                 keyCount = keyCount + 1
+             end
+
+             local msg = {
+                 device_keys= {
+                     user_id = user_id,
+                     device_id = device_id,
+                     valid_after_ts = 1234567890123,-- FIXME,
+                     valid_until_ts = 2345678901234,--FIXME,
+                     algorithms= { ALGO },
+                     keys = {
+                         [ALGO..":"..device_id] = id_keys.curve25519
+                     },
+                     signatures = {
+                         [user_id] = {
+                             [ALGO..":"..device_id] = "<signature_base64>"
+                         }
+                     }
+                 },
+                 one_time_keys = one_time_keys
+             }
+             local data = urllib.urlencode{
+                 access_token = SERVER.access_token
+             }
+             http('/keys/upload/'..device_id..'?'..data, {
+                 postfields = json.encode(msg)
+             }, 'http_cb', 5*1000, nil, v2_api_ns)
+         end
+         olmdata.claim = function(user_id) -- Fetch one time keys
+             if DEBUG then
+                 perr('olm: Claiming '..tostring(user_id))
+             end
+             -- TODO take a list of ids for batch downloading
+             local auth = urllib.urlencode{ access_token = SERVER.access_token }
+             local device_ids = olmdata.device_keys[user_id]
+             local data = {
+                 one_time_keys = {}
+             }
+             for device_id, kd in pairs(device_ids) do
+                 data.one_time_keys[user_id] = {
+                     [device_id] = ALGO
+                }
+             end
+             http('/keys/take?'..auth, {postfields=json.encode(data)}, 'http_cb', 30*1000, nil, v2_api_ns)
+         end
+         server.olm = olmdata
+         local fd = io.open(homedir..'account.olm', 'rb')
+         local pickled = ''
+         if fd then
+             pickled = fd:read'*all'
+             fd:close()
+         end
+         if pickled == '' then
+             account:create()
+             local ret, err = account:generate_one_time_keys(5)
+             perr(err)
+             olmdata.save()
+         else
+             local unpickle, err = account:unpickle(OLM_KEY, pickled)
+             --account:create()
+             --account:generate_one_time_keys(10)
+             perr(err)
+         end
+         --server.olm.identity_keys = server.olm.account:identity_keys()
+         w.print('', 'matrix: Encryption loaded. To send encrypted messages in a room, use command /encrypt with a room as active current buffer')
+         if DEBUG then
+             dbg{olm={
+                 'Loaded identity:',
+                 json.decode(account:identity_keys())
+             }}
+         end
+
+     else
+        w.print('', SCRIPT_NAME .. ': Unable to load olm encryption library. Not enabling encryption. Please see documenation for how to enable.')
+     end
+
+
      return server
 end
 
@@ -636,10 +871,10 @@ function MatrixServer:poll()
     self.polling = true
     local data = urllib.urlencode({
         access_token = self.access_token,
-        timeout = 1000*30,
+        timeout = 1000*POLL_INTERVAL,
         from = self.end_token
     })
-    http('/events?'..data, nil, 'poll_cb')
+    http('/events?'..data, nil, 'poll_cb', (POLL_INTERVAL+10)*1000)
 end
 
 function MatrixServer:addRoom(room)
@@ -725,7 +960,8 @@ function send(data, calls)
         -- Run IRC modifiers (XXX: maybe run out1 also?
         body = w.hook_modifier_exec('irc_out1_PRIVMSG', '', body)
 
-        if w.config_get_plugin('local_echo') == 'on' then
+        if w.config_get_plugin('local_echo') == 'on'
+                and not olmstatus then -- don't use local_echo when encrypting
             -- Generate local echo
             for _, r in pairs(SERVER.rooms) do
                 if r.identifier == id then
@@ -768,10 +1004,89 @@ function send(data, calls)
             data.postfields.formatted_body = htmlbody
         end
 
+        local api_event_function = 'm.room.message'
+
+        -- Find the room
+        local room
+        for _, r in pairs(SERVER.rooms) do
+            if r.identifier == id then
+                room = r
+                break
+            end
+        end
+        if olmstatus and room.encrypted then
+            api_event_function = 'm.room.encrypted'
+            local olmd = SERVER.olm
+
+            -- FIXME
+            --local id_key = json.decode(olmd.account:identity_keys()).curve25519
+            -- FIXME
+            --local ot_key
+            --for _,k in pairs(json.decode(olmd.account:one_time_keys()).curve25519) do
+            --    ot_key = k
+            --    break -- use first key
+            --end
+
+            data.postfields.algorithm = ALGO
+            data.postfields.sender_key = ot_key
+            data.postfields.ciphertexts = {}
+
+            -- get list of recipients
+            local room = SERVER.rooms[id]
+            local recipients = {}
+            -- get all the keys
+            for k, _ in pairs(room.users) do
+                table.insert(recipients, k)
+                -- FIXME fetch keys
+            end
+            -- check outbound sessions for all of them
+            for _, user_id in pairs(recipients) do
+                local ciphertexts = {}
+                local found_device_key = false
+                for device_id, device_data in pairs(olmd.device_keys[user_id] or {}) do -- FIXME check for missing keys?
+                    found_device_key = true
+                    local message = data.postfields.body or ''
+                    -- FIXME store sessions using session_id
+                    -- FIXME check for existing session
+                    local session = olm.Session.new()
+                    -- FIXME use correct device key and user key
+                    local otk = olmd.otks[user_id][device_id]
+                    if not otk then
+                        perr("Missing OTK for user: "..user_id.." and device: "..device_id.."")
+                    end
+                    local id_key = device_data.keys[ALGO..':'..device_id]
+                    if not id_key then
+                        perr("Missing key for user: "..user_id.." and device: "..device_id.."")
+                    end
+                    if id_key and otk then
+                        session:create_outbound(olmd.account, id_key, otk)
+                        local session_id = session:session_id()
+                        perr('Session ID:'..tostring(session_id))
+                        --local pickled = session:pickle(OLM_KEY)
+                        local message_type, encrypted_body = session:encrypt(message)
+                        session:clear()
+                        -- encrypt body
+                        local ciphertext = {
+                            [device_id] = {
+                                ["type"] = tonumber(message_type),
+                                body = encrypted_body
+                            }
+                        }
+                        table.insert(ciphertexts, ciphertext)
+                    end
+                end
+                if found_device_key then
+                    data.postfields.ciphertexts[user_id] = ciphertexts
+                end
+            end
+            -- remove cleartext from original msg
+            data.postfields.body = nil
+            data.postfields.formatted_body = nil
+        end
+
         data.postfields = json.encode(data.postfields)
 
-
-        http(('/rooms/%s/send/m.room.message?access_token=%s')
+        http(('/rooms/%s/send/'..api_event_function..'?access_token=%s')
             :format(
               urllib.quote(id),
               urllib.quote(SERVER.access_token)
@@ -932,6 +1247,8 @@ Room.create = function(obj)
     room.users = {}
     -- Cache the rooms power levels state
     room.power_levels = {users={}}
+    -- Encryption status of room
+    room.encrypted = false
     -- We might not be a member yet
     local state_events = obj.state or {}
     for _, state in pairs(state_events) do
@@ -1330,7 +1647,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
     -- like redactions and localecho, etc
     tag{chunk.event_id}
 
-    if chunk['type'] == 'm.room.message' then
+    if chunk['type'] == 'm.room.message' or chunk['type'] == 'm.room.encrypted' then
         if not backlog and not is_self then
             tag'notify_message'
         end
@@ -1343,6 +1660,38 @@ function Room:parseChunk(chunk, backlog, chunktype)
             -- We don't support redactions
             return
         end
+
+        if chunk['type'] == 'm.room.encrypted' then
+            content.body = 'encrypted message, unable to decrypt'
+            if olmstatus then
+                -- Find our id
+                local ciphertexts = content.ciphertexts or {}
+                local ciphertext = ciphertexts[SERVER.user_id]
+                if not ciphertext then
+                    content.body = 'encrypted message, no ciphertext for our ID'
+                else
+                    -- Use first device
+                    local devices = ciphertext
+                    for _, devices in pairs(devices) do
+                        for device, data in pairs(devices) do
+                            if device == SERVER.olm.device_id then
+                                local session = olm.Session.new()
+                                session:create_inbound(SERVER.olm.account, data.body)
+                                local decrypted, err = session:decrypt(0, data.body)
+                                if err then
+                                    content.body = "Decryption error: "..err
+                                else
+                                    content.body = decrypted
+                                end
+                                session:clear()
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
         if content['msgtype'] == 'm.text' then
             body = content['body']
             -- TODO
@@ -1375,7 +1724,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
             local data = ("%s\t%s"):format(prefix, body)
             if not backlog and is_self
                 -- TODO better check, to work for multiple weechat clients
-              and w.config_get_plugin('local_echo') == 'on' then
+              and w.config_get_plugin('local_echo') == 'on'
+              and not olmstatus then
                 -- We have already locally echoed this line
                 return
             else
@@ -1398,7 +1748,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
         if not backlog and is_self
           -- TODO better check, to work for multiple weechat clients
-          and w.config_get_plugin('local_echo') == 'on' then
+          and w.config_get_plugin('local_echo') == 'on'
+          and not olmstatus then
             -- We have already locally echoed this line
             return
         end
@@ -1676,6 +2027,13 @@ function Room:Invite(id)
     SERVER:Invite(self.identifier, id)
 end
 
+function Room:Download_keys()
+    for id, name in pairs(self.users) do
+        -- TODO enable batch downloading of keys here when synapse can handle it
+        SERVER.olm.query({id})
+    end
+end
+
 function poll(a,b)
     SERVER:poll()
     return w.WEECHAT_RC_OK
@@ -1683,7 +2041,7 @@ end
 
 function polltimer_cb(a,b)
     local now = os.time()
-    if (now - SERVER.polltime) > 65 then
+    if (now - SERVER.polltime) > POLL_INTERVAL+10 then
         SERVER.polling = false
         SERVER:poll()
     end
@@ -1923,6 +2281,18 @@ function msg_command_cb(data, current_buffer, args)
     end
 end
 
+function encrypt_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        room.encrypted = true
+        mprint('Enabling encryption for outgoing messages in room ' .. tostring(room.name))
+        room:Download_keys()
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -1962,7 +2332,7 @@ function typing_notification_cb(signal, sig_type, data)
     return w.WEECHAT_RC_OK
 end
 
-if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "unload", "UTF-8") then
+if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "matrix_unload", "UTF-8") then
     local settings = {
         homeserver_url= {'https://matrix.org/', 'Full URL including port to your homeserver or use default matrix.org'},
         user= {'', 'Your homeserver username'},
@@ -1971,6 +2341,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
         local_echo = {'on', 'Print lines locally instead of waiting for resturn from server'},
+        --olm_secret = {'', 'Password used to secure olm stores'},
     }
     -- set default settings
     local version = w.info_get('version_number', '') or 0
@@ -1983,10 +2354,13 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
                      value[2], value[1]))
         end
     end
+    errprefix = wconf'weechat.look.prefix_error'
+    errprefix_c = wcolor'weechat.color.chat_prefix_error'
+    homedir = w.info_get('weechat_dir', '') .. '/'
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
         'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'invite', 'nick',
-        'whois', 'notice', 'msg'
+        'whois', 'notice', 'msg', 'encrypt'
     }
     for _, c in pairs(commands) do
         w.hook_command_run('/'..c, c..'_command_cb', '')
@@ -1996,7 +2370,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
 
-    local cmds = {'help', 'connect'}
+    local cmds = {'help', 'connect', 'debug'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
         '[command] [command options]',
         'Commands:\n' ..table.concat(cmds, '\n') ..
