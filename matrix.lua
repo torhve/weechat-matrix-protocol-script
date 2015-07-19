@@ -1044,21 +1044,23 @@ function send(data, calls)
                 local ciphertexts = {}
                 local found_device_key = false
                 for device_id, device_data in pairs(olmd.device_keys[user_id] or {}) do -- FIXME check for missing keys?
-                    found_device_key = true
                     local message = data.postfields.body or ''
                     -- FIXME store sessions using session_id
                     -- FIXME check for existing session
                     local session = olm.Session.new()
                     -- FIXME use correct device key and user key
-                    local otk = olmd.otks[user_id][device_id]
+                    local otk = olmd.otks[user_id]
                     if not otk then
                         perr("Missing OTK for user: "..user_id.." and device: "..device_id.."")
+                    else
+                        otk = otk[device_id]
                     end
                     local id_key = device_data.keys[ALGO..':'..device_id]
                     if not id_key then
                         perr("Missing key for user: "..user_id.." and device: "..device_id.."")
                     end
                     if id_key and otk then
+                        found_device_key = true
                         session:create_outbound(olmd.account, id_key, otk)
                         local session_id = session:session_id()
                         perr('Session ID:'..tostring(session_id))
