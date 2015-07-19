@@ -162,6 +162,9 @@ size_t olm_session_id(
     OlmSession * session,
     void * id, size_t id_length
 );
+size_t olm_account_mark_keys_as_published(
+    OlmAccount * account
+);
 
 ]]
 
@@ -170,7 +173,7 @@ local ERR = olm.olm_error()
 
 -- Save C string buffer to a table so the garbage collector does not clean
 -- the buffers before the olm library is done reading and writing to them
--- TODO: this could be saved per account or per session and cleaned when 
+-- TODO: this could be saved per account or per session and cleaned when
 -- user of library calls clean
 local strings = {}
 
@@ -297,6 +300,10 @@ function Account:unpickle(key, pickle)
         self.ptr, key, #key, pickle_buffer, #pickle
     ))
     return ret, err
+end
+
+function Account:mark_keys_as_published()
+    return self:errcheck(olm.olm_account_mark_keys_as_published(self.ptr))
 end
 
 local Session = {}
@@ -481,6 +488,8 @@ if test then
     local decrypted = b_session:decrypt(message_1_type, message_1_body)
     print( 'Decrypted message: ', decrypted)
     assert(secret_message == decrypted)
+
+    bob:mark_keys_as_published()
 
     print('A session id: ', a_session:session_id())
     for i=1,10000 do
