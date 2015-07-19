@@ -57,7 +57,7 @@ local OUT = {}
 local BUFFER
 local Room
 local MatrixServer
-local DEBUG = false -- TODO: make /matrix debug to toggle
+local DEBUG = false
 local POLL_INTERVAL = 360
 
 local default_color = w.color('default')
@@ -685,31 +685,36 @@ MatrixServer.create = function()
              for id, k in pairs(otks.curve25519) do
                  keyCount = keyCount + 1
              end
+             perr('olm: keycount: '..tostring(keyCount))
              if keyCount < 5 then -- try to always have 5 keys
-                 account:generate_one_time_keys(5 - keyCount)
+                 perr('olm: newly generated keys: '..tostring(tonumber(
+                     account:generate_one_time_keys(5 - keyCount))))
+                 otks = json.decode(account:one_time_keys())
              end
              for id, k in pairs(otks.curve25519) do
                  one_time_keys[ALGO..':'..id] = k
                  keyCount = keyCount + 1
              end
 
+
              local msg = {
-                 device_keys= {
-                     user_id = user_id,
+                 device_keys = {
+                     algorithms= { ALGO },
                      device_id = device_id,
+                     keys = {
+                         ["ed25519:"..device_id] = id_keys.curve25519
+                     },
+                     user_id = user_id,
                      valid_after_ts = 1234567890123,-- FIXME,
                      valid_until_ts = 2345678901234,--FIXME,
-                     algorithms= { ALGO },
-                     keys = {
-                         [ALGO..":"..device_id] = id_keys.curve25519
-                     },
-                     signatures = {
-                         [user_id] = {
-                             [ALGO..":"..device_id] = "<signature_base64>"
-                         }
-                     }
                  },
                  one_time_keys = one_time_keys
+             }
+             -- FIXME proper signing
+             msg.device_keys.signatures = {
+                 [user_id] = {
+                     ["ed25519:"..device_id] = account:sign(json.encode(msg.device_keys))
+                 }
              }
              local data = urllib.urlencode{
                  access_token = SERVER.access_token
@@ -717,6 +722,9 @@ MatrixServer.create = function()
              http('/keys/upload/'..device_id..'?'..data, {
                  postfields = json.encode(msg)
              }, 'http_cb', 5*1000, nil, v2_api_ns)
+
+             account:mark_keys_as_published()
+
          end
          olmdata.claim = function(user_id) -- Fetch one time keys
              if DEBUG then
@@ -1055,7 +1063,7 @@ function send(data, calls)
                     else
                         otk = otk[device_id]
                     end
-                    local id_key = device_data.keys[ALGO..':'..device_id]
+                    local id_key = device_data.keys['ed25519:'..device_id]
                     if not id_key then
                         perr("Missing key for user: "..user_id.." and device: "..device_id.."")
                     end
