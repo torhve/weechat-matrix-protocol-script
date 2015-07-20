@@ -548,7 +548,7 @@ function real_http_cb(data, command, rc, stdout, stderr)
             -- We store room_id in data
             local room_id = data
             SERVER:delRoom(room_id)
-        elseif command:find'/keys/take' then
+        elseif command:find'/keys/claim' then
             local count = 0
             for user_id, v in pairs(js.one_time_keys or {}) do
                 for device_id, keys in pairs(v or {}) do
@@ -556,14 +556,26 @@ function real_http_cb(data, command, rc, stdout, stderr)
                         SERVER.olm.otks[user_id] = {[device_id]=key}  -- TODO support more than one
                         perr(('olm: Recieved OTK for user %s for device id %s'):format(user_id, device_id))
                         count = count + 1
+                        SERVER.olm.create_session(user_id)
                     end
                 end
             end
         elseif command:find'/keys/query' then
             for k, v in pairs(js.device_keys or {}) do
                 SERVER.olm.device_keys[k] = v
-                -- Claim keys for all
-                SERVER.olm.claim(k)
+                -- Claim keys for all only if missing session
+                for device_id, device_data in pairs(v) do
+                    -- First try to create session from saved data
+                    -- if that doesn't success we will download otk
+                    SERVER.olm.create_session(k)
+                    local pickle = SERVER.olm.sessions[k..':'..device_id]
+                    if not pickle then
+                        perr('Downloading otk for user '..k..', and device_id: '..device_id)
+                        SERVER.olm.claim(k)
+                    else
+                        perr('Reusing existing session for user '..k)
+                    end
+                end
             end
         elseif command:find'/keys/upload' then
             for algo, count in pairs(js.one_time_key_counts) do
@@ -619,6 +631,7 @@ function real_http_cb(data, command, rc, stdout, stderr)
     return w.WEECHAT_RC_OK
 end
 function http_cb(data, command, rc, stdout, stderr)
+    --local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
     local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
     return result
 end
@@ -707,8 +720,8 @@ MatrixServer.create = function()
                          ["curve25519:"..olmdata.device_id] = id_keys.curve25519
                      },
                      user_id = user_id,
-                     valid_after_ts = 1234567890123,-- FIXME,
-                     valid_until_ts = 2345678901234,--FIXME,
+                     --valid_after_ts = 1234567890123,-- FIXME,
+                     --valid_until_ts = 2345678901234,--FIXME,
                  },
                  one_time_keys = one_time_keys
              }
@@ -743,7 +756,49 @@ MatrixServer.create = function()
                      [device_id] = 'curve25519'
                 }
              end
-             http('/keys/take?'..auth, {postfields=json.encode(data)}, 'http_cb', 30*1000, nil, v2_api_ns)
+             http('/keys/claim?'..auth, {postfields=json.encode(data)}, 'http_cb', 30*1000, nil, v2_api_ns)
+         end
+         olmdata.create_session = function(user_id)
+             perr('olm: creating session for user: '..user_id)
+             for device_id, device_data in pairs(olmdata.device_keys[user_id] or {}) do
+                 -- Frist try to unpickle session from filesystem
+                 local session_filename = homedir..user_id..'.'..device_id..'.session.olm'
+                 local fd, err = io.open(session_filename, 'rb')
+                 if fd then
+                     perr('olm: found saved session for user: '..user_id)
+                     local pickled = fd:read'*all'
+                     olmdata.sessions[user_id..':'..device_id] = pickled
+                     fd:close()
+                 else
+                     perr('olm: saved new session for user: '..user_id)
+                     local session = olm.Session.new()
+                     local otk = olmdata.otks[user_id]
+                     if not otk then
+                         perr("Missing OTK for user: "..user_id.." and device: "..device_id.."")
+                     else
+                         otk = otk[device_id]
+                     end
+                     local id_key = device_data.keys['curve25519:'..device_id]
+                     if not id_key then
+                         perr("Missing key for user: "..user_id.." and device: "..device_id.."")
+                     end
+                     if id_key and otk then
+                         session:create_outbound(olmdata.account, id_key, otk)
+                         local session_id = session:session_id()
+                         perr('Session ID:'..tostring(session_id))
+                         local pickled = session:pickle(OLM_KEY)
+                         olmdata.sessions[user_id..':'..device_id] = pickled
+                         local fd, err = io.open(session_filename, 'wb')
+                         if fd then
+                             fd:write(pickled)
+                             fd:close()
+                         else
+                             perr('olm: error saving session: '..tostring(err))
+                         end
+                     end
+                     session:clear()
+                 end
+             end
          end
          server.olm = olmdata
          local fd = io.open(homedir..'account.olm', 'rb')
@@ -764,7 +819,8 @@ MatrixServer.create = function()
              perr(err)
          end
          local identity = json.decode(account:identity_keys())
-         olmdata.device_id = identity.ed25519
+         -- TODO figure out what device id is supposed to be
+         olmdata.device_id = identity.ed25519:match'%w*' -- problems with nonalfanum
          olmdata.device_key = identity.curve25519
          w.print('', 'matrix: Encryption loaded. To send encrypted messages in a room, use command /encrypt with a room as active current buffer')
          if DEBUG then
@@ -1034,6 +1090,9 @@ function send(data, calls)
             data.postfields.sender_key = olmd.device_key
             data.postfields.ciphertexts = {}
 
+            -- Count number of devices we are sending to
+            local recipient_count = 0
+
             -- get list of recipients
             local room = SERVER.rooms[id]
             local recipients = {}
@@ -1042,32 +1101,19 @@ function send(data, calls)
                 table.insert(recipients, k)
                 -- FIXME fetch keys
             end
-            -- check outbound sessions for all of them
+            -- find outbound sessions for all of them
             for _, user_id in pairs(recipients) do
                 local ciphertexts = {}
-                local found_device_key = false
+                local found_session = false
                 for device_id, device_data in pairs(olmd.device_keys[user_id] or {}) do -- FIXME check for missing keys?
-                    local message = data.postfields.body or ''
-                    -- FIXME store sessions using session_id
-                    -- FIXME check for existing session
-                    local session = olm.Session.new()
-                    -- FIXME use correct device key and user key
-                    local otk = olmd.otks[user_id]
-                    if not otk then
-                        perr("Missing OTK for user: "..user_id.." and device: "..device_id.."")
-                    else
-                        otk = otk[device_id]
-                    end
-                    local id_key = device_data.keys['ed25519:'..device_id]
-                    if not id_key then
-                        perr("Missing key for user: "..user_id.." and device: "..device_id.."")
-                    end
-                    if id_key and otk then
-                        found_device_key = true
-                        session:create_outbound(olmd.account, id_key, otk)
+                    local pickled = olmd.sessions[user_id..':'..device_id]
+                    if pickled then
+                        found_session = true
+                        local session = olm.Session.new()
+                        session:unpickle(OLM_KEY, pickled)
                         local session_id = session:session_id()
                         perr('Session ID:'..tostring(session_id))
-                        --local pickled = session:pickle(OLM_KEY)
+                        local message = data.postfields.body or ''
                         local message_type, encrypted_body = session:encrypt(message)
                         session:clear()
                         -- encrypt body
@@ -1078,15 +1124,21 @@ function send(data, calls)
                             }
                         }
                         table.insert(ciphertexts, ciphertext)
+                        recipient_count = recipient_count + 1
                     end
                 end
-                if found_device_key then
+                if found_session then
                     data.postfields.ciphertexts[user_id] = ciphertexts
                 end
             end
             -- remove cleartext from original msg
             data.postfields.body = nil
             data.postfields.formatted_body = nil
+
+            if recipient_count == 0 then
+                perr('Aborted sending of encrypted message: could not find any valid recipients')
+                return
+            end
         end
 
         data.postfields = json.encode(data.postfields)
@@ -2032,6 +2084,14 @@ function Room:Invite(id)
     SERVER:Invite(self.identifier, id)
 end
 
+function Room:Encrypt()
+    self.encrypted = true
+    -- Download keys for all members
+    self:Download_keys()
+    -- Create sessions
+    -- Pickle.
+    -- Save
+end
 function Room:Download_keys()
     for id, name in pairs(self.users) do
         -- TODO enable batch downloading of keys here when synapse can handle it
@@ -2289,9 +2349,8 @@ end
 function encrypt_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        room.encrypted = true
         mprint('Enabling encryption for outgoing messages in room ' .. tostring(room.name))
-        room:Download_keys()
+        room:Encrypt()
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
