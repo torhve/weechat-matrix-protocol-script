@@ -167,6 +167,7 @@ end
 
 local function sign_json(json_object, signing_key, signing_name)
     -- See: https://github.com/matrix-org/matrix-doc/blob/master/specification/31_event_signing.rst
+    -- Maybe use:http://regex.info/code/JSON.lua which sorts keys
     local signatures = json_object.signatures or {}
     json_object.signatures = nil
 
@@ -565,9 +566,11 @@ function real_http_cb(data, command, rc, stdout, stderr)
                 SERVER.olm.claim(k)
             end
         elseif command:find'/keys/upload' then
-            local key_count = js.one_time_key_counts[ALGO]
-            SERVER.olm.key_count = key_count
-            perr('olm: Number of own OTKs uploaded to server: '..key_count)
+            for algo, count in pairs(js.one_time_key_counts) do
+                local key_count = count
+                SERVER.olm.key_count = key_count
+                perr('olm: Number of own OTKs uploaded to server: '..key_count)
+            end
         elseif command:find'upload' then
             -- We store room_id in data
             local room_id = data
@@ -663,7 +666,7 @@ MatrixServer.create = function()
                  device_keys = {}
              }
              for _,uid in pairs(user_ids) do
-                 data.device_keys[uid] = false
+                 data.device_keys[uid] = {false}
              end
              http('/keys/query/?'..auth,
                 {postfields=json.encode(data)},
@@ -700,7 +703,7 @@ MatrixServer.create = function()
                      algorithms= { ALGO },
                      device_id = olmdata.device_id,
                      keys = {
-                         ["ed25519:"..olmdata.device_id] = id_keys.ed25519
+                         ["ed25519:"..olmdata.device_id] = id_keys.ed25519,
                          ["curve25519:"..olmdata.device_id] = id_keys.curve25519
                      },
                      user_id = user_id,
@@ -737,7 +740,7 @@ MatrixServer.create = function()
              }
              for device_id, kd in pairs(device_ids) do
                  data.one_time_keys[user_id] = {
-                     [device_id] = ALGO
+                     [device_id] = 'curve25519'
                 }
              end
              http('/keys/take?'..auth, {postfields=json.encode(data)}, 'http_cb', 30*1000, nil, v2_api_ns)
@@ -762,7 +765,7 @@ MatrixServer.create = function()
          end
          local identity = json.decode(account:identity_keys())
          olmdata.device_id = identity.ed25519
-         --server.olm.identity_keys = server.olm.account:identity_keys()
+         olmdata.device_key = identity.curve25519
          w.print('', 'matrix: Encryption loaded. To send encrypted messages in a room, use command /encrypt with a room as active current buffer')
          if DEBUG then
              dbg{olm={
@@ -1027,17 +1030,8 @@ function send(data, calls)
             api_event_function = 'm.room.encrypted'
             local olmd = SERVER.olm
 
-            -- FIXME
-            --local id_key = json.decode(olmd.account:identity_keys()).curve25519
-            -- FIXME
-            --local ot_key
-            --for _,k in pairs(json.decode(olmd.account:one_time_keys()).curve25519) do
-            --    ot_key = k
-            --    break -- use first key
-            --end
-
             data.postfields.algorithm = ALGO
-            data.postfields.sender_key = ot_key
+            data.postfields.sender_key = olmd.device_key
             data.postfields.ciphertexts = {}
 
             -- get list of recipients
