@@ -57,7 +57,7 @@ local OUT = {}
 local BUFFER
 local Room
 local MatrixServer
-local DEBUG = false
+local DEBUG = true
 local POLL_INTERVAL = 360
 
 local default_color = w.color('default')
@@ -640,12 +640,10 @@ MatrixServer.create = function()
      if olmstatus then -- check if encryption is available
          -- FIXME configurable key using weechat sec data
          local account = olm.Account.new()
-         local device_id = homedir:gsub('/', ''):gsub('%.', '') -- use weechat homedir as unique id
          local olmdata = {
              account=account,
              sessions={},
              device_keys={},
-             device_id = device_id,
              otks={}
          }
          olmdata.save = function()
@@ -691,8 +689,8 @@ MatrixServer.create = function()
                      account:generate_one_time_keys(5 - keyCount))))
                  otks = json.decode(account:one_time_keys())
              end
-             for id, k in pairs(otks.curve25519) do
-                 one_time_keys[ALGO..':'..id] = k
+             for id, key in pairs(otks.curve25519) do
+                 one_time_keys['curve25519:'..id] = key
                  keyCount = keyCount + 1
              end
 
@@ -700,9 +698,10 @@ MatrixServer.create = function()
              local msg = {
                  device_keys = {
                      algorithms= { ALGO },
-                     device_id = device_id,
+                     device_id = olmdata.device_id,
                      keys = {
-                         ["ed25519:"..device_id] = id_keys.curve25519
+                         ["ed25519:"..olmdata.device_id] = id_keys.ed25519
+                         ["curve25519:"..olmdata.device_id] = id_keys.curve25519
                      },
                      user_id = user_id,
                      valid_after_ts = 1234567890123,-- FIXME,
@@ -713,13 +712,13 @@ MatrixServer.create = function()
              -- FIXME proper signing
              msg.device_keys.signatures = {
                  [user_id] = {
-                     ["ed25519:"..device_id] = account:sign(json.encode(msg.device_keys))
+                     ["ed25519:"..olmdata.device_id] = account:sign(json.encode(msg.device_keys))
                  }
              }
              local data = urllib.urlencode{
                  access_token = SERVER.access_token
              }
-             http('/keys/upload/'..device_id..'?'..data, {
+             http('/keys/upload/'..olmdata.device_id..'?'..data, {
                  postfields = json.encode(msg)
              }, 'http_cb', 5*1000, nil, v2_api_ns)
 
@@ -761,6 +760,8 @@ MatrixServer.create = function()
              --account:generate_one_time_keys(10)
              perr(err)
          end
+         local identity = json.decode(account:identity_keys())
+         olmdata.device_id = identity.ed25519
          --server.olm.identity_keys = server.olm.account:identity_keys()
          w.print('', 'matrix: Encryption loaded. To send encrypted messages in a room, use command /encrypt with a room as active current buffer')
          if DEBUG then
