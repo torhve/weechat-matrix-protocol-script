@@ -526,8 +526,12 @@ function real_http_cb(data, command, rc, stdout, stderr)
             -- Timer used in cased of errors to restart the polling cycle
             -- During normal operation the polling should re-invoke itself
             SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
-            if olmstatus then -- Upload keys
-                SERVER.olm.upload_keys()
+            if olmstatus then
+                -- timer that checks number of otks available on the server
+                SERVER.otktimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "otktimer_cb", "")
+                SERVER.olm.query{SERVER.user_id}
+                --SERVER.olm.upload_keys()
+                SERVER.olm.check_server_keycount()
             end
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
@@ -578,18 +582,23 @@ function real_http_cb(data, command, rc, stdout, stderr)
                     SERVER.olm.create_session(k)
                     local pickle = SERVER.olm.sessions[k..':'..device_id]
                     if not pickle then
-                        perr('Downloading otk for user '..k..', and device_id: '..device_id)
+                        perr('olm: Downloading otk for user '..k..', and device_id: '..device_id)
                         SERVER.olm.claim(k)
                     else
-                        perr('Reusing existing session for user '..k)
+                        perr('olm: Reusing existing session for user '..k)
                     end
                 end
             end
         elseif command:find'/keys/upload' then
+            local key_count = 0
+            local sensible_number_of_keys = 20
             for algo, count in pairs(js.one_time_key_counts) do
-                local key_count = count
+                key_count = count
                 SERVER.olm.key_count = key_count
-                perr('olm: Number of own OTKs uploaded to server: '..key_count)
+            end
+            perr('olm: Number of own OTKs uploaded to server: '..key_count)
+            if key_count < sensible_number_of_keys then
+                SERVER.olm.upload_keys()
             end
         elseif command:find'upload' then
             -- We store room_id in data
@@ -661,7 +670,6 @@ MatrixServer.create = function()
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
 
      if olmstatus then -- check if encryption is available
-         -- FIXME configurable key using weechat sec data
          local account = olm.Account.new()
          local olmdata = {
              account=account,
@@ -693,6 +701,12 @@ MatrixServer.create = function()
                 'http_cb',
                 5*1000, nil,
                 v2_api_ns )
+         end
+         olmdata.check_server_keycount = function()
+             local data = urllib.urlencode{access_token=SERVER.access_token}
+             http('/keys/upload/'..olmdata.device_id..'?'..data,
+                {},
+                'http_cb', 5*1000, nil, v2_api_ns)
          end
          olmdata.upload_keys = function()
              if DEBUG then
@@ -781,13 +795,13 @@ MatrixServer.create = function()
                      local session = olm.Session.new()
                      local otk = olmdata.otks[user_id]
                      if not otk then
-                         perr("Missing OTK for user: "..user_id.." and device: "..device_id.."")
+                         perr("olm: Missing OTK for user: "..user_id.." and device: "..device_id.."")
                      else
                          otk = otk[device_id]
                      end
                      local id_key = device_data.keys['curve25519:'..device_id]
                      if not id_key then
-                         perr("Missing key for user: "..user_id.." and device: "..device_id.."")
+                         perr("olm: Missing key for user: "..user_id.." and device: "..device_id.."")
                      end
                      if id_key and otk then
                          session:create_outbound(olmdata.account, id_key, otk)
@@ -1099,16 +1113,8 @@ function send(data, calls)
             -- Count number of devices we are sending to
             local recipient_count = 0
 
-            -- get list of recipients
             local room = SERVER.rooms[id]
-            local recipients = {}
-            -- get all the keys
-            for k, _ in pairs(room.users) do
-                table.insert(recipients, k)
-                -- FIXME fetch keys
-            end
-            -- find outbound sessions for all of them
-            for _, user_id in pairs(recipients) do
+            for user_id, _ in pairs(room.users) do
                 local ciphertexts = {}
                 local found_session = false
                 for device_id, device_data in pairs(olmd.device_keys[user_id] or {}) do -- FIXME check for missing keys?
@@ -1788,7 +1794,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             if not backlog and is_self
                 -- TODO better check, to work for multiple weechat clients
               and w.config_get_plugin('local_echo') == 'on'
-              and not olmstatus then
+              and not olmstatus then -- disable local echo for encryption
                 -- We have already locally echoed this line
                 return
             else
@@ -1812,7 +1818,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         if not backlog and is_self
           -- TODO better check, to work for multiple weechat clients
           and w.config_get_plugin('local_echo') == 'on'
-          and not olmstatus then
+          and not olmstatus then -- disable local echo for encrypted messages
             -- We have already locally echoed this line
             return
         end
@@ -2116,6 +2122,11 @@ function polltimer_cb(a,b)
         SERVER.polling = false
         SERVER:poll()
     end
+    return w.WEECHAT_RC_OK
+end
+
+function otktimer_cb(a,b)
+    SERVER.olm.check_server_keycount()
     return w.WEECHAT_RC_OK
 end
 
