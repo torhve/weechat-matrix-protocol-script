@@ -84,6 +84,7 @@ debug.traceback = function (...)
     -- simply remove first frame from the stack trace
     return (dtraceback(...):gsub("(stack traceback:\n)[^\n]*\n", "%1"))
 end
+
 local function tprint(tbl, indent, out)
     if not indent then indent = 0 end
     for k, v in pairs(tbl) do
@@ -115,6 +116,7 @@ local function werr(message)
     --write error message to core buffer
     if message == nil then return end
 end
+
 local function perr(message)
     if message == nil then return end
     -- Print error message to the matrix "server" buffer using WeeChat styled
@@ -133,7 +135,7 @@ local function dbg(message)
     if type(message) == 'table' then
         tprint(message)
     else
-        message = ("DEBUG: %s"):format(tostring(message))
+        message = ("DEBUG\t%s"):format(tostring(message))
         mprint(BUFFER, message)
     end
 end
@@ -835,6 +837,7 @@ MatrixServer.create = function()
              end
          end
          server.olm = olmdata
+         -- Try to read account from filesystem, if not generate a new account
          local fd = io.open(homedir..'account.olm', 'rb')
          local pickled = ''
          if fd then
@@ -848,8 +851,6 @@ MatrixServer.create = function()
              olmdata.save()
          else
              local unpickle, err = account:unpickle(OLM_KEY, pickled)
-             --account:create()
-             --account:generate_one_time_keys(10)
              perr(err)
          end
          local identity = json.decode(account:identity_keys())
@@ -865,7 +866,7 @@ MatrixServer.create = function()
          end
 
      else
-        w.print('', SCRIPT_NAME .. ': Unable to load olm encryption library. Not enabling encryption. Please see documenation for how to enable.')
+        w.print('', SCRIPT_NAME .. ': Unable to load olm encryption library. Not enabling encryption. Please see documentation (REDME.md) for information on how to enable.')
      end
 
 
