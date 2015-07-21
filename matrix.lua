@@ -57,7 +57,7 @@ local OUT = {}
 local BUFFER
 local Room
 local MatrixServer
-local DEBUG = true
+local DEBUG = false
 local POLL_INTERVAL = 360
 
 local default_color = w.color('default')
@@ -308,6 +308,16 @@ function matrix_command_cb(data, current_buffer, args)
     end
 
     return w.WEECHAT_RC_OK
+end
+
+function configuration_changed_cb(data, option, value)
+    if value == 'on' then
+        DEBUG = true
+        w.print('', SCRIPT_NAME..': debugging messages enabled')
+    else
+        DEBUG = false
+        w.print('', SCRIPT_NAME..': debugging messages disabled')
+    end
 end
 
 local function http(url, post, cb, timeout, extra, api_ns)
@@ -591,13 +601,16 @@ function real_http_cb(data, command, rc, stdout, stderr)
             end
         elseif command:find'/keys/upload' then
             local key_count = 0
+            local valid_response = false
             local sensible_number_of_keys = 20
             for algo, count in pairs(js.one_time_key_counts) do
+                valid_response = true
                 key_count = count
                 SERVER.olm.key_count = key_count
             end
             perr('olm: Number of own OTKs uploaded to server: '..key_count)
-            if key_count < sensible_number_of_keys then
+            -- Check for valid response so we don't create endless loop here
+            if valid_response and key_count < sensible_number_of_keys then
                 SERVER.olm.upload_keys()
             end
         elseif command:find'upload' then
@@ -2422,6 +2435,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
         local_echo = {'on', 'Print lines locally instead of waiting for resturn from server'},
+        debug = {'off', 'Print a lot of extra information to help with finding bugs and other problems.'}
         --olm_secret = {'', 'Password used to secure olm stores'},
     }
     -- set default settings
@@ -2450,6 +2464,12 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     if w.config_get_plugin('typing_notices') == 'on' then
         w.hook_signal('input_text_changed', "typing_notification_cb", '')
     end
+
+    if w.config_get_plugin('debug') == 'on' then
+        DEBUG = true
+    end
+
+    weechat.hook_config('plugins.var.lua.matrix.debug', 'configuration_changed_cb', '')
 
     local cmds = {'help', 'connect', 'debug'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
