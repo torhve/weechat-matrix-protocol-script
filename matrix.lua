@@ -248,18 +248,16 @@ local function strip_irc_formatting(s)
 end
 
 function matrix_unload()
-    w.print('', 'Unloading')
+    w.print('', 'matrix: Unloading')
     -- Clear/free olm memory if loaded
     if olmstatus then
-        w.print('', 'Saving olm state')
+        w.print('', 'matrix: Saving olm state')
         SERVER.olm.save()
-        w.print('', 'Clearing olm state from memory')
-        --perr(SERVER.olm.session:clear())
-        perr(SERVER.olm.account:clear())
+        w.print('', 'matrix: Clearing olm state from memory')
+        SERVER.olm.account:clear()
         --SERVER.olm = nil
-        --olm = nil -- Explict niling of this prevents SIGSEG with luajit
     end
-    w.print('', 'Done')
+    w.print('', 'matrix: done cleaning up!')
     return w.WEECHAT_RC_OK
 end
 
@@ -344,6 +342,11 @@ local function http(url, post, cb, timeout, extra, api_ns)
 end
 
 function poll_cb(data, command, rc, stdout, stderr)
+    -- Because of a bug in WeeChat sometimes the stdout gets prepended by
+    -- any number of BEL chars (hex 07). Let's have a nasty workaround and
+    -- just replace them away.
+    stdout = (stdout:gsub('^\007*', ''))
+
     if stderr ~= '' then
         perr(('%s'):format(stderr))
         SERVER.polling = false
@@ -432,6 +435,11 @@ function real_http_cb(data, command, rc, stdout, stderr)
         mprint(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
     end
+
+    -- Because of a bug in WeeChat sometimes the stdout gets prepended by
+    -- any number of BEL chars (hex 07). Let's have a nasty workaround and
+    -- just replace them away.
+    stdout = (stdout:gsub('^\007*', ''))
 
     if stdout ~= '' then
         if not STDOUT[command] then
@@ -631,7 +639,6 @@ function real_http_cb(data, command, rc, stdout, stderr)
     return w.WEECHAT_RC_OK
 end
 function http_cb(data, command, rc, stdout, stderr)
-    --local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
     local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
     return result
 end
@@ -870,10 +877,9 @@ function MatrixServer:connect()
             ["user"]=user,
             ["password"]=password
         }
-        -- Set a short timeout so user can get more immidiate feedback
         http('/login', {
-                postfields = json.encode(post)
-            }, 'http_cb', 5*1000)
+            postfields = json.encode(post)
+        }, 'http_cb', 5*1000) -- Set a short timeout so user can get more immidiate feedback
     end
 end
 
