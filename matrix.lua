@@ -2435,7 +2435,7 @@ end
 
 if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "matrix_unload", "UTF-8") then
     local settings = {
-        homeserver_url= {'https://matrix.org/', 'Full URL including port to your homeserver or use default matrix.org'},
+        homeserver_url= {'https://matrix.org/', 'Full URL including port to your homeserver (including trailing slash) or use default matrix.org'},
         user= {'', 'Your homeserver username'},
         password= {'', 'Your homeserver password'},
         backlog_lines= {'120', 'Number of lines to fetch from backlog upon connecting'},
