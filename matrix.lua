@@ -1745,17 +1745,16 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
 
         if chunk['type'] == 'm.room.encrypted' then
+            tag{'no_log'} -- Don't log encrypted message
             content.body = 'encrypted message, unable to decrypt'
             if olmstatus then
                 -- Find our id
                 local ciphertexts = content.ciphertexts or {}
                 local ciphertext = ciphertexts[SERVER.user_id]
                 if not ciphertext then
-                    content.body = 'encrypted message, no ciphertext for our ID'
+                    content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
                 else
-                    -- Use first device
-                    local devices = ciphertext
-                    for _, devices in pairs(devices) do
+                    for _, devices in pairs(chipertext) do
                         for device, data in pairs(devices) do
                             if device == SERVER.olm.device_id then
                                 local session = olm.Session.new()
@@ -2017,6 +2016,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
         if not result then
             perr 'Could not find message to redact :('
         end
+    elseif chunk['type'] == 'm.room.history_visibility' then
+        self.history_visibility = chunk.content.history_visibility
     else
         perr(('Unknown chunk type %s%s%s in room %s%s%s'):format(
             w.color'bold',
@@ -2025,6 +2026,9 @@ function Room:parseChunk(chunk, backlog, chunktype)
             w.color'bold',
             self.name,
             default_color))
+        if DEBUG then
+            dbg{chunk=chunk}
+        end
     end
 end
 
