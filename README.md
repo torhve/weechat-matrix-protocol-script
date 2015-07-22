@@ -86,6 +86,10 @@ git pull
 sudo apt-get install weechat lua-cjson
 ```
 
+Note that the weechat in jessie (1.0.1) is quite old compared to upstream and is
+missing many bugfixes. This plugin may not work with older versions. There are
+unofficial packages [here](https://weechat.org/download/debian/).
+
 ## How to get WeeChat & Lua deps up and running on OSX:
 
 ```bash
