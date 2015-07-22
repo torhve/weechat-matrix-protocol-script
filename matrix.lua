@@ -542,7 +542,7 @@ function real_http_cb(data, command, rc, stdout, stderr)
             SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
             if olmstatus then
                 -- timer that checks number of otks available on the server
-                SERVER.otktimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "otktimer_cb", "")
+                SERVER.otktimer = w.hook_timer(5*60*1000, 0, 0, "otktimer_cb", "")
                 SERVER.olm.query{SERVER.user_id}
                 --SERVER.olm.upload_keys()
                 SERVER.olm.check_server_keycount()
