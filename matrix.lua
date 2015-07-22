@@ -58,7 +58,9 @@ local BUFFER
 local Room
 local MatrixServer
 local DEBUG = false
-local POLL_INTERVAL = 360
+-- How many seconds to timeout if nothing happened on the server. If something
+-- happens before it will return sooner.
+local POLL_INTERVAL = 120
 
 local default_color = w.color('default')
 -- Cache error variables so we don't have to look them up for every error
@@ -1754,7 +1756,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 if not ciphertext then
                     content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
                 else
-                    for _, devices in pairs(chipertext) do
+                    for _, devices in pairs(ciphertext) do
                         for device, data in pairs(devices) do
                             if device == SERVER.olm.device_id then
                                 local session = olm.Session.new()
@@ -2484,6 +2486,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         -- Completions
         table.concat(cmds, '|'),
         'matrix_command_cb', '')
+
+    -- TODO use hook window_scrolled to dynamically fetch more messages
 
     SERVER = MatrixServer.create()
     SERVER:connect()
