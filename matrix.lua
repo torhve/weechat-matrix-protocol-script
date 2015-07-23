@@ -60,7 +60,8 @@ local MatrixServer
 local DEBUG = false
 -- How many seconds to timeout if nothing happened on the server. If something
 -- happens before it will return sooner.
-local POLL_INTERVAL = 120
+-- default Nginx proxy timeout is 60s, so we go slightly lower
+local POLL_INTERVAL = 55
 
 local default_color = w.color('default')
 -- Cache error variables so we don't have to look them up for every error
