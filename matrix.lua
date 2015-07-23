@@ -606,7 +606,7 @@ function real_http_cb(data, command, rc, stdout, stderr)
             end
         elseif command:find'/keys/upload' then
             local key_count = 0
-            local valid_response = false
+            ---local valid_response = false
             local sensible_number_of_keys = 20
             for algo, count in pairs(js.one_time_key_counts) do
                 valid_response = true
@@ -614,8 +614,8 @@ function real_http_cb(data, command, rc, stdout, stderr)
                 SERVER.olm.key_count = key_count
             end
             perr('olm: Number of own OTKs uploaded to server: '..key_count)
-            -- Check for valid response so we don't create endless loop here
-            if valid_response and key_count < sensible_number_of_keys then
+            -- TODO make endless loop prevention in case of server error
+            if key_count < sensible_number_of_keys then
                 SERVER.olm.upload_keys()
             end
         elseif command:find'upload' then
@@ -798,18 +798,18 @@ MatrixServer.create = function()
              http('/keys/claim?'..auth, {postfields=json.encode(data)}, 'http_cb', 30*1000, nil, v2_api_ns)
          end
          olmdata.create_session = function(user_id)
-             perr('olm: creating session for user: '..user_id)
              for device_id, device_data in pairs(olmdata.device_keys[user_id] or {}) do
+                 perr(('olm: creating session for user: %s, and device: %s'):format(user_id, device_id))
                  -- Frist try to unpickle session from filesystem
                  local session_filename = homedir..user_id..'.'..device_id..'.session.olm'
                  local fd, err = io.open(session_filename, 'rb')
                  if fd then
-                     perr('olm: found saved session for user: '..user_id)
+                     perr(('olm: found saved session user: %s, and device: %s'):format(user_id, device_id))
                      local pickled = fd:read'*all'
                      olmdata.sessions[user_id..':'..device_id] = pickled
                      fd:close()
                  else
-                     perr('olm: saved new session for user: '..user_id)
+                     perr(('olm: saving new session for: %s, and device: %s'):format(user_id, device_id))
                      local session = olm.Session.new()
                      local otk = olmdata.otks[user_id]
                      if not otk then
