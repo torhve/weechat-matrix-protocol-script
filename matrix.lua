@@ -1125,19 +1125,16 @@ function send(data, calls)
 
             data.postfields.algorithm = ALGO
             data.postfields.sender_key = olmd.device_key
-            data.postfields.ciphertexts = {}
+            data.postfields.ciphertext = {}
 
             -- Count number of devices we are sending to
             local recipient_count = 0
 
             local room = SERVER.rooms[id]
             for user_id, _ in pairs(room.users) do
-                local ciphertexts = {}
-                local found_session = false
                 for device_id, device_data in pairs(olmd.device_keys[user_id] or {}) do -- FIXME check for missing keys?
                     local pickled = olmd.sessions[user_id..':'..device_id]
                     if pickled then
-                        found_session = true
                         local session = olm.Session.new()
                         session:unpickle(OLM_KEY, pickled)
                         local session_id = session:session_id()
@@ -1147,17 +1144,19 @@ function send(data, calls)
                         session:clear()
                         -- encrypt body
                         local ciphertext = {
-                            [device_id] = {
-                                ["type"] = tonumber(message_type),
-                                body = encrypted_body
-                            }
+                            ["type"] = tonumber(message_type),
+                            body = encrypted_body
                         }
-                        table.insert(ciphertexts, ciphertext)
+                        local device_key
+                        -- TODO save this better somehow?
+                        for key_id, key_data in pairs(device_data.keys) do
+                            if key_id:match('^curve25519') then
+                                device_key = key_data
+                            end
+                        end
+                        data.postfields.ciphertext[device_key] = ciphertext
                         recipient_count = recipient_count + 1
                     end
-                end
-                if found_session then
-                    data.postfields.ciphertexts[user_id] = ciphertexts
                 end
             end
             -- remove cleartext from original msg
@@ -1752,31 +1751,24 @@ function Room:parseChunk(chunk, backlog, chunktype)
             content.body = 'encrypted message, unable to decrypt'
             if olmstatus then
                 -- Find our id
-                local ciphertexts = content.ciphertexts or {}
-                local ciphertext = ciphertexts[SERVER.user_id]
+                local ciphertexts = content.ciphertext or {}
+                local ciphertext = ciphertexts[SERVER.olm.device_key]
                 if not ciphertext then
                     content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
                 else
-                    for _, devices in pairs(ciphertext) do
-                        for device, data in pairs(devices) do
-                            if device == SERVER.olm.device_id then
-                                local session = olm.Session.new()
-                                session:create_inbound(SERVER.olm.account, data.body)
-                                local decrypted, err = session:decrypt(0, data.body)
-                                session:clear()
-                                if err then
-                                    content.body = "Decryption error: "..err
-                                else
-                                    -- Style the message so user can tell if it's
-                                    -- an encrypted message or not
-                                    local color = w.color(w.config_get_plugin(
-                                        'encrypted_message_color'))
-                                    decrypted = color .. decrypted
-                                    content.body = decrypted
-                                end
-                                break
-                            end
-                        end
+                    local session = olm.Session.new()
+                    session:create_inbound(SERVER.olm.account, ciphertext.body)
+                    local decrypted, err = session:decrypt(0, ciphertext.body)
+                    session:clear()
+                    if err then
+                        content.body = "Decryption error: "..err
+                    else
+                        -- Style the message so user can tell if it's
+                        -- an encrypted message or not
+                        local color = w.color(w.config_get_plugin(
+                            'encrypted_message_color'))
+                        decrypted = color .. decrypted
+                        content.body = decrypted
                     end
                 end
             end
@@ -1919,6 +1911,10 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     wcolor('irc.color.message_join')
                 )
                 w.print_date_tags(self.buffer, time_int, tags(), data)
+                -- if this is an encrypted room, also download key
+                if olmstatus and self.encrypted then
+                    SERVER.olm.query{chunk.user_id}
+                end
             end
         elseif chunk['content']['membership'] == 'leave' then
             if chunktype == 'states' then
