@@ -1762,12 +1762,17 @@ function Room:parseChunk(chunk, backlog, chunktype)
                                 local session = olm.Session.new()
                                 session:create_inbound(SERVER.olm.account, data.body)
                                 local decrypted, err = session:decrypt(0, data.body)
+                                session:clear()
                                 if err then
                                     content.body = "Decryption error: "..err
                                 else
+                                    -- Style the message so user can tell if it's
+                                    -- an encrypted message or not
+                                    local color = w.color(w.config_get_plugin(
+                                        'encrypted_message_color'))
+                                    decrypted = color .. decrypted
                                     content.body = decrypted
                                 end
-                                session:clear()
                                 break
                             end
                         end
@@ -2442,7 +2447,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
         local_echo = {'on', 'Print lines locally instead of waiting for resturn from server'},
-        debug = {'off', 'Print a lot of extra information to help with finding bugs and other problems.'}
+        debug = {'off', 'Print a lot of extra information to help with finding bugs and other problems.'},
+        encrypted_message_color = {'lightgreen', 'Print encrypted mesages with this color'},
         --olm_secret = {'', 'Password used to secure olm stores'},
     }
     -- set default settings

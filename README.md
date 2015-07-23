@@ -116,8 +116,9 @@ If encryption is loaded, and your matrix homeserver supports encryption it will 
 
 To enable encryption for otgoing messages in a room type */encrypt* with a room as active current buffer and it will download the keys of the other users in the room and encrypt using those.
 
-If you're having problems, you can try command `/matrix debug` to get a lot of extra messages in your matrix buffer.
+If you're having problems, you can try command `/matrix debug` or `/set plugins.var.lua.matrix.debug on` to get a lot of extra messages in your matrix buffer.
 
+Encrypted messages will be printed in color lightgreen to tell you the user that is an encrypted message. This can be configured with option `/set plugins.var.lua.matrix.debug encrypted_message_color`
 
 # License
 
