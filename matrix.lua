@@ -581,25 +581,26 @@ function real_http_cb(data, command, rc, stdout, stderr)
             for user_id, v in pairs(js.one_time_keys or {}) do
                 for device_id, keys in pairs(v or {}) do
                     for key_id, key in pairs(keys or {}) do
-                        SERVER.olm.otks[user_id] = {[device_id]=key}  -- TODO support more than one
+                        SERVER.olm.otks[user_id..':'..device_id] = {[device_id]=key}
                         perr(('olm: Recieved OTK for user %s for device id %s'):format(user_id, device_id))
                         count = count + 1
-                        SERVER.olm.create_session(user_id)
+                        SERVER.olm.create_session(user_id, device_id)
                     end
                 end
             end
         elseif command:find'/keys/query' then
             for k, v in pairs(js.device_keys or {}) do
                 SERVER.olm.device_keys[k] = v
+
                 -- Claim keys for all only if missing session
                 for device_id, device_data in pairs(v) do
                     -- First try to create session from saved data
                     -- if that doesn't success we will download otk
-                    SERVER.olm.create_session(k)
+                    SERVER.olm.create_session(k, device_id)
                     local pickle = SERVER.olm.sessions[k..':'..device_id]
                     if not pickle then
                         perr('olm: Downloading otk for user '..k..', and device_id: '..device_id)
-                        SERVER.olm.claim(k)
+                        SERVER.olm.claim(k, device_id)
                     else
                         perr('olm: Reusing existing session for user '..k)
                     end
@@ -791,63 +792,62 @@ MatrixServer.create = function()
              account:mark_keys_as_published()
 
          end
-         olmdata.claim = function(user_id) -- Fetch one time keys
+         olmdata.claim = function(user_id, device_id) -- Fetch one time keys
              if DEBUG then
-                 perr('olm: Claiming '..tostring(user_id))
+                 perr(('olm: Claiming OTK for user: %s and device: %s'):format(user_id, device_id))
              end
              -- TODO take a list of ids for batch downloading
              local auth = urllib.urlencode{ access_token = SERVER.access_token }
-             local device_ids = olmdata.device_keys[user_id]
              local data = {
-                 one_time_keys = {}
-             }
-             for device_id, kd in pairs(device_ids) do
-                 data.one_time_keys[user_id] = {
+                 one_time_keys = {
                      [device_id] = 'curve25519'
-                }
-             end
+                 }
+             }
              http('/keys/claim?'..auth, {postfields=json.encode(data)}, 'http_cb', 30*1000, nil, v2_api_ns)
          end
-         olmdata.create_session = function(user_id)
-             for device_id, device_data in pairs(olmdata.device_keys[user_id] or {}) do
-                 perr(('olm: creating session for user: %s, and device: %s'):format(user_id, device_id))
-                 -- Frist try to unpickle session from filesystem
-                 local session_filename = homedir..user_id..'.'..device_id..'.session.olm'
-                 local fd, err = io.open(session_filename, 'rb')
-                 if fd then
-                     perr(('olm: found saved session user: %s, and device: %s'):format(user_id, device_id))
-                     local pickled = fd:read'*all'
-                     olmdata.sessions[user_id..':'..device_id] = pickled
-                     fd:close()
+         olmdata.create_session = function(user_id, device_id)
+             perr(('olm: creating session for user: %s, and device: %s'):format(user_id, device_id))
+             local device_data = olmdata.device_keys[user_id][device_id]
+             if not device_data then
+                 perr(('olm: missing device data for user: %s, and device: %s'):format(user_id, device_id))
+                 return
+             end
+             -- Frist try to unpickle session from filesystem
+             local session_filename = homedir..user_id..'.'..device_id..'.session.olm'
+             local fd, err = io.open(session_filename, 'rb')
+             if fd then
+                 perr(('olm: found saved session user: %s, and device: %s'):format(user_id, device_id))
+                 local pickled = fd:read'*all'
+                 olmdata.sessions[user_id..':'..device_id] = pickled
+                 fd:close()
+             else
+                 perr(('olm: saving new session for: %s, and device: %s'):format(user_id, device_id))
+                 local session = olm.Session.new()
+                 local otk = olmdata.otks[user_id..':'..device_id]
+                 if not otk then
+                     perr("olm: Missing OTK for user: "..user_id.." and device: "..device_id.."")
                  else
-                     perr(('olm: saving new session for: %s, and device: %s'):format(user_id, device_id))
-                     local session = olm.Session.new()
-                     local otk = olmdata.otks[user_id]
-                     if not otk then
-                         perr("olm: Missing OTK for user: "..user_id.." and device: "..device_id.."")
-                     else
-                         otk = otk[device_id]
-                     end
-                     local id_key = device_data.keys['curve25519:'..device_id]
-                     if not id_key then
-                         perr("olm: Missing key for user: "..user_id.." and device: "..device_id.."")
-                     end
-                     if id_key and otk then
-                         session:create_outbound(olmdata.account, id_key, otk)
-                         local session_id = session:session_id()
-                         perr('Session ID:'..tostring(session_id))
-                         local pickled = session:pickle(OLM_KEY)
-                         olmdata.sessions[user_id..':'..device_id] = pickled
-                         local fd, err = io.open(session_filename, 'wb')
-                         if fd then
-                             fd:write(pickled)
-                             fd:close()
-                         else
-                             perr('olm: error saving session: '..tostring(err))
-                         end
-                     end
-                     session:clear()
+                     otk = otk[device_id]
                  end
+                 local id_key = device_data.keys['curve25519:'..device_id]
+                 if not id_key then
+                     perr("olm: Missing key for user: "..user_id.." and device: "..device_id.."")
+                 end
+                 if id_key and otk then
+                     session:create_outbound(olmdata.account, id_key, otk)
+                     local session_id = session:session_id()
+                     perr('Session ID:'..tostring(session_id))
+                     local pickled = session:pickle(OLM_KEY)
+                     olmdata.sessions[user_id..':'..device_id] = pickled
+                     local fd, err = io.open(session_filename, 'wb')
+                     if fd then
+                         fd:write(pickled)
+                         fd:close()
+                     else
+                         perr('olm: error saving session: '..tostring(err))
+                     end
+                 end
+                 session:clear()
              end
          end
          server.olm = olmdata
@@ -878,12 +878,9 @@ MatrixServer.create = function()
                  json.decode(account:identity_keys())
              }}
          end
-
      else
         w.print('', SCRIPT_NAME .. ': Unable to load olm encryption library. Not enabling encryption. Please see documentation (REDME.md) for information on how to enable.')
      end
-
-
      return server
 end
 
@@ -1154,7 +1151,7 @@ function send(data, calls)
                             room_id = room.identifier,
                             ['type']="m.room.message",
                             fingerprint="", -- TODO: Olm:sha256 participants
-                            sender_device = olmd.device_key,
+                            sender_device = olmd.device_id,
                             content = {
                                 msgtype=msgtype,
                                 body=data.postfields.body or ''
