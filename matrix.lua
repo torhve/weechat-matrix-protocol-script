@@ -1388,6 +1388,10 @@ function Room:topic(topic)
     SERVER:state(self.identifier, 'm.room.topic', {topic=topic})
 end
 
+function Room:public()
+    SERVER:state(self.identifier, 'm.room.join_rules', {join_rule='public'})
+end
+
 function Room:upload(filename)
     SERVER:upload(self.identifier, filename)
 end
@@ -2406,6 +2410,18 @@ function encrypt_command_cb(data, current_buffer, args)
     end
 end
 
+function public_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        mprint('Marking room as public: ' .. tostring(room.name))
+        room:public()
+        return w.WEECHAT_RC_OK_EAT
+    else
+        mprint('Run command from a room')
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -2475,7 +2491,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
         'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'invite', 'nick',
-        'whois', 'notice', 'msg', 'encrypt'
+        'whois', 'notice', 'msg', 'encrypt', 'public'
     }
     for _, c in pairs(commands) do
         w.hook_command_run('/'..c, c..'_command_cb', '')
