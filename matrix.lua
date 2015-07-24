@@ -70,7 +70,7 @@ local errprefix
 local errprefix_c
 
 local homedir
-local ALGO = 'm.olm.v1.curve25519-aes-sha2'
+local OLM_ALGORITHM = 'm.olm.v1.curve25519-aes-sha2'
 local OLM_KEY = 'secr3t' -- TODO configurable using weechat sec data
 local v2_api_ns = '_matrix/client/v2_alpha'
 
@@ -79,6 +79,7 @@ debug.traceback = function (...)
     if select('#', ...) >= 1 then
         local err, lvl = ...
         local trace = dtraceback(err, (lvl or 2)+1)
+        perr(err)
         perr(trace)
     end
     -- direct call to debug.traceback: return the original.
@@ -744,30 +745,39 @@ MatrixServer.create = function()
                      account:generate_one_time_keys(5 - keyCount))))
                  otks = json.decode(account:one_time_keys())
              end
+
              for id, key in pairs(otks.curve25519) do
                  one_time_keys['curve25519:'..id] = key
                  keyCount = keyCount + 1
              end
 
+             -- Construct JSON manually so it's ready for signing
+             local keys_json = '{"algorithms":["' .. OLM_ALGORITHM .. '"]'
+                 .. ',"device_id":"' .. olmdata.device_id .. '"'
+                 .. ',"keys":'
+                 .. '{"ed25519:' .. olmdata.device_id .. '":"'
+                 .. id_keys.ed25519
+                 .. '","curve25519:' .. olmdata.device_id .. '":"'
+                 .. id_keys.curve25519
+                 .. '"}'
+                 .. ',"user_id":"' .. user_id
+                 .. '"}'
+
+             local success, key_data = pcall(json.decode, keys_json)
+             -- TODO save key data to device_keys so we don't have to download
+             -- our own keys from the servers?
+             if not success then
+                 perr(('olm: upload_keys: %s when converting to json: %s')
+                    :format(key_data, keys_json))
+             end
 
              local msg = {
-                 device_keys = {
-                     algorithms= { ALGO },
-                     device_id = olmdata.device_id,
-                     keys = {
-                         ["ed25519:"..olmdata.device_id] = id_keys.ed25519,
-                         ["curve25519:"..olmdata.device_id] = id_keys.curve25519
-                     },
-                     user_id = user_id,
-                     --valid_after_ts = 1234567890123,-- FIXME,
-                     --valid_until_ts = 2345678901234,--FIXME,
-                 },
+                 device_keys = json.decode(keys_data),
                  one_time_keys = one_time_keys
              }
-             -- FIXME proper signing
              msg.device_keys.signatures = {
                  [user_id] = {
-                     ["ed25519:"..olmdata.device_id] = account:sign(json.encode(msg.device_keys))
+                     ["ed25519:"..olmdata.device_id] = account:sign(keys_json)
                  }
              }
              local data = urllib.urlencode{
@@ -1123,7 +1133,7 @@ function send(data, calls)
             api_event_function = 'm.room.encrypted'
             local olmd = SERVER.olm
 
-            data.postfields.algorithm = ALGO
+            data.postfields.algorithm = OLM_ALGORITHM
             data.postfields.sender_key = olmd.device_key
             data.postfields.ciphertext = {}
 
