@@ -91,17 +91,18 @@ end
 
 local function tprint(tbl, indent, out)
     if not indent then indent = 0 end
+    if not out then out = BUFFER end
     for k, v in pairs(tbl) do
         local formatting = string.rep("  ", indent) .. k .. ": "
         if type(v) == "table" then
-            w.print(BUFFER, formatting)
-            tprint(v, indent+1)
+            w.print(out, formatting)
+            tprint(v, indent+1, out)
         elseif type(v) == 'boolean' then
-            w.print(BUFFER, formatting .. tostring(v))
+            w.print(out, formatting .. tostring(v))
         elseif type(v) == 'userdata' then
-            w.print(BUFFER, formatting .. tostring(v))
+            w.print(out, formatting .. tostring(v))
         else
-            w.print(BUFFER, formatting .. v)
+            w.print(out, formatting .. v)
         end
     end
 end
@@ -522,7 +523,6 @@ function real_http_cb(data, command, rc, stdout, stderr)
                         myroom:parseChunk(chunk, true, 'states')
                     end
                 end
-
                 local messages = room.messages
                 if messages then
                     local chunks = messages.chunk or {}
@@ -667,8 +667,9 @@ function real_http_cb(data, command, rc, stdout, stderr)
     return w.WEECHAT_RC_OK
 end
 function http_cb(data, command, rc, stdout, stderr)
-    local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
-    return result
+    return real_http_cb(data, command, rc, stdout, stderr)
+    --local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
+    --return result
 end
 
 MatrixServer = {}
@@ -772,7 +773,7 @@ MatrixServer.create = function()
              end
 
              local msg = {
-                 device_keys = json.decode(keys_data),
+                 device_keys = key_data,
                  one_time_keys = one_time_keys
              }
              msg.device_keys.signatures = {
@@ -1149,8 +1150,17 @@ function send(data, calls)
                         session:unpickle(OLM_KEY, pickled)
                         local session_id = session:session_id()
                         perr('Session ID:'..tostring(session_id))
-                        local message = data.postfields.body or ''
-                        local message_type, encrypted_body = session:encrypt(message)
+                        local payload = {
+                            room_id = room.identifier,
+                            ['type']="m.room.message",
+                            fingerprint="", -- TODO: Olm:sha256 participants
+                            sender_device = olmd.device_key,
+                            content = {
+                                msgtype=msgtype,
+                                body=data.postfields.body or ''
+                            }
+                        }
+                        local message_type, encrypted_body = session:encrypt(json.encode(payload))
                         session:clear()
                         -- encrypt body
                         local ciphertext = {
@@ -1741,7 +1751,6 @@ function Room:parseChunk(chunk, backlog, chunktype)
         is_self = true
         tag{'no_highlight','notify_none'}
     end
-
     -- Add Event ID to each line so can use it later to match on for things
     -- like redactions and localecho, etc
     tag{chunk.event_id}
@@ -1751,10 +1760,16 @@ function Room:parseChunk(chunk, backlog, chunktype)
             tag'notify_message'
         end
 
+        if chunk['type'] == 'm.room.encrypted' then
+            -- vector client doesn't provide this
+            chunk.content.msgtype = 'm.text'
+        end
+
         local time_int = chunk['origin_server_ts']/1000
         local color = default_color
         local body
         local content = chunk['content']
+
         if not content['msgtype'] then
             -- We don't support redactions
             return
@@ -1765,8 +1780,13 @@ function Room:parseChunk(chunk, backlog, chunktype)
             content.body = 'encrypted message, unable to decrypt'
             if olmstatus then
                 -- Find our id
-                local ciphertexts = content.ciphertext or {}
-                local ciphertext = ciphertexts[SERVER.olm.device_key]
+                local ciphertexts = content.ciphertext
+                local ciphertext
+                if not ciphertexts then
+                    content.body = 'Recieved an encrypted message, but could not find ciphertext array'
+                else
+                    ciphertext = ciphertexts[SERVER.olm.device_key]
+                end
                 if not ciphertext then
                     content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
                 else
@@ -1777,12 +1797,17 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     if err then
                         content.body = "Decryption error: "..err
                     else
-                        -- Style the message so user can tell if it's
-                        -- an encrypted message or not
-                        local color = w.color(w.config_get_plugin(
-                            'encrypted_message_color'))
-                        decrypted = color .. decrypted
-                        content.body = decrypted
+                        local success, payload = pcall(json.decode, decrypted)
+                        if not success then
+                            content.body = "Payload error: "..payload
+                        else
+                            content.msgtype = payload.content.msgtype
+                            -- Style the message so user can tell if it's
+                            -- an encrypted message or not
+                            local color = w.color(w.config_get_plugin(
+                                'encrypted_message_color'))
+                            content.body = color .. payload.content.body
+                        end
                     end
                 end
             end
@@ -1821,7 +1846,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
             if not backlog and is_self
                 -- TODO better check, to work for multiple weechat clients
               and w.config_get_plugin('local_echo') == 'on'
-              and not olmstatus then -- disable local echo for encryption
+              and not olmstatus -- disable local echo for encryption
+              then
                 -- We have already locally echoed this line
                 return
             else
