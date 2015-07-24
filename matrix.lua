@@ -2251,11 +2251,15 @@ function create_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room or current_buffer == BUFFER then
         local _, args = split_args(args)
-        -- Room names are supposed to be without # and homeserver, so
-        -- we try to help the user out here
-        local alias = args:match'#?(.*):?'
-        -- Create a non-public room with argument as alias
-        SERVER:CreateRoom(false, alias, nil)
+        if args then
+            -- Room names are supposed to be without # and homeserver, so
+            -- we try to help the user out here
+            local alias = args:match'#?(.*):?'
+            -- Create a non-public room with argument as alias
+            SERVER:CreateRoom(false, alias, nil)
+        else
+            mprint 'Use /create room-name'
+        end
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
