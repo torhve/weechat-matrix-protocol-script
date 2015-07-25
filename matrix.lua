@@ -875,7 +875,7 @@ MatrixServer.create = function()
          -- TODO figure out what device id is supposed to be
          olmdata.device_id = identity.ed25519:match'%w*' -- problems with nonalfanum
          olmdata.device_key = identity.curve25519
-         w.print('', 'matrix: Encryption loaded. To send encrypted messages in a room, use command /encrypt with a room as active current buffer')
+         w.print('', 'matrix: Encryption loaded. To send encrypted messages in a room, use command /encrypt on with a room as active current buffer')
          if DEBUG then
              dbg{olm={
                  'Loaded identity:',
@@ -2433,8 +2433,16 @@ end
 function encrypt_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        mprint('Enabling encryption for outgoing messages in room ' .. tostring(room.name))
-        room:Encrypt()
+        local _, args = split_args(args)
+        if args == 'on' then
+            mprint('Enabling encryption for outgoing messages in room ' .. tostring(room.name))
+            room:Encrypt()
+        elseif args == 'off' then
+            mprint('Disabling encryption for outgoing messages in room ' .. tostring(room.name))
+            room.encrypted = false
+        else
+            w.print(current_buffer, 'Use /encrypt on or /encrypt off to turn encryption on or off')
+        end
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK

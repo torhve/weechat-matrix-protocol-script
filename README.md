@@ -114,7 +114,7 @@ When this is in place, you need to place `olm.lua` binding a place where WeeChat
 Whether encryption loads OK or not it should print a message in weechat core buffer when you load matrix script to tell you if it could be loaded OK or not.
 If encryption is loaded, and your matrix homeserver supports encryption it will upload keys upon connection.
 
-To enable encryption for otgoing messages in a room type */encrypt* with a room as active current buffer and it will download the keys of the other users in the room and encrypt using those.
+To enable encryption for otgoing messages in a room type */encrypt on* with a room as active current buffer and it will download the keys of the other users in the room and encrypt using those.
 
 If you're having problems, you can try command `/matrix debug` or `/set plugins.var.lua.matrix.debug on` to get a lot of extra messages in your matrix buffer.
 
