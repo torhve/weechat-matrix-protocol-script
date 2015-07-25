@@ -1793,7 +1793,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 else
                     local session = olm.Session.new()
                     local inbound, err = session:create_inbound(SERVER.olm.account, ciphertext.body)
-                    local decrypted, err = session:decrypt(0, ciphertext.body)
+                    local decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
                     session:clear()
                     if err then
                         content.body = "Decryption error: "..err
