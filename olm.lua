@@ -244,7 +244,11 @@ function Account:create()
 end
 
 function Account:identity_keys()
-    local out_length = tonumber(olm.olm_account_identity_keys_length(self.ptr))
+    local out_length, err  = self:errcheck(olm.olm_account_identity_keys_length(self.ptr))
+    if err then
+        return out_length, err
+    end
+    out_length = tonumber(out_length)
     local out_buffer = create_string_buffer(out_length)
     local ret, err = self:errcheck(olm.olm_account_identity_keys(self.ptr, out_buffer, out_length))
     if err then
@@ -397,9 +401,11 @@ end
 
 function Session:decrypt(message_type, message)
     local message_buffer = create_string(message)
-    local max_plaintext_length = tonumber(olm.olm_decrypt_max_plaintext_length(
+    local max_plaintext_length, err = self:errcheck(olm.olm_decrypt_max_plaintext_length(
         self.ptr, message_type, message_buffer, #message
     ))
+    if err then return nil, err end
+    max_plaintext_length = tonumber(max_plaintext_length)
     local plaintext_buffer = create_string_buffer(max_plaintext_length)
     local message_buffer = create_string(message)
     local plaintext_length, err = self:errcheck(olm.olm_decrypt(
