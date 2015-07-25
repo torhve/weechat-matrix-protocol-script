@@ -74,21 +74,6 @@ local OLM_ALGORITHM = 'm.olm.v1.curve25519-aes-sha2'
 local OLM_KEY = 'secr3t' -- TODO configurable using weechat sec data
 local v2_api_ns = '_matrix/client/v2_alpha'
 
-local dtraceback = debug.traceback
-debug.traceback = function (...)
-    if select('#', ...) >= 1 then
-        local err, lvl = ...
-        local trace = dtraceback(err, (lvl or 2)+1)
-        perr(err)
-        perr(trace)
-    end
-    -- direct call to debug.traceback: return the original.
-    -- debug.traceback(nil, level) doesn't work in Lua 5.1
-    -- (http://lua-users.org/lists/lua-l/2011-06/msg00574.html), so
-    -- simply remove first frame from the stack trace
-    return (dtraceback(...):gsub("(stack traceback:\n)[^\n]*\n", "%1"))
-end
-
 local function tprint(tbl, indent, out)
     if not indent then indent = 0 end
     if not out then out = BUFFER end
@@ -143,6 +128,20 @@ local function dbg(message)
         message = ("DEBUG\t%s"):format(tostring(message))
         mprint(BUFFER, message)
     end
+end
+
+local dtraceback = debug.traceback
+debug.traceback = function (...)
+    if select('#', ...) >= 1 then
+        local err, lvl = ...
+        local trace = dtraceback(err, (lvl or 2)+1)
+        perr(trace)
+    end
+    -- direct call to debug.traceback: return the original.
+    -- debug.traceback(nil, level) doesn't work in Lua 5.1
+    -- (http://lua-users.org/lists/lua-l/2011-06/msg00574.html), so
+    -- simply remove first frame from the stack trace
+    return (dtraceback(...):gsub("(stack traceback:\n)[^\n]*\n", "%1"))
 end
 
 local function weechat_eval(text)
@@ -668,9 +667,12 @@ function real_http_cb(data, command, rc, stdout, stderr)
     return w.WEECHAT_RC_OK
 end
 function http_cb(data, command, rc, stdout, stderr)
-    return real_http_cb(data, command, rc, stdout, stderr)
-    --local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
-    --return result
+    ---return real_http_cb(data, command, rc, stdout, stderr)
+    local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
+    if not status then
+        perr('Error in http_cb: ' .. tostring(result))
+    end
+    return result
 end
 
 MatrixServer = {}
@@ -800,7 +802,9 @@ MatrixServer.create = function()
              local auth = urllib.urlencode{ access_token = SERVER.access_token }
              local data = {
                  one_time_keys = {
-                     [device_id] = 'curve25519'
+                     [user_id] = {
+                         [device_id] = 'curve25519'
+                     }
                  }
              }
              http('/keys/claim?'..auth, {postfields=json.encode(data)}, 'http_cb', 30*1000, nil, v2_api_ns)
@@ -1788,7 +1792,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
                 else
                     local session = olm.Session.new()
-                    session:create_inbound(SERVER.olm.account, ciphertext.body)
+                    local inbound, err = session:create_inbound(SERVER.olm.account, ciphertext.body)
                     local decrypted, err = session:decrypt(0, ciphertext.body)
                     session:clear()
                     if err then
