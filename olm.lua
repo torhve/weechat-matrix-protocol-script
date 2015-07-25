@@ -165,6 +165,10 @@ size_t olm_session_id(
 size_t olm_account_mark_keys_as_published(
     OlmAccount * account
 );
+size_t olm_remove_one_time_keys(
+    OlmAccount * account,
+    OlmSession * session
+);
 
 ]]
 
@@ -308,6 +312,10 @@ end
 
 function Account:mark_keys_as_published()
     return self:errcheck(olm.olm_account_mark_keys_as_published(self.ptr))
+end
+
+function Account:remove_one_time_keys(session)
+    return self:errcheck(olm.olm_remove_one_time_keys(self.ptr, session.ptr))
 end
 
 local Session = {}
@@ -496,6 +504,8 @@ if test then
     assert(secret_message == decrypted)
 
     bob:mark_keys_as_published()
+
+    bob:remove_one_time_keys(b_session)
 
     print('A session id: ', a_session:session_id())
     for i=1,10000 do
