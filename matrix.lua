@@ -69,7 +69,7 @@ local default_color = w.color('default')
 local errprefix
 local errprefix_c
 
-local homedir
+local HOMEDIR
 local OLM_ALGORITHM = 'm.olm.v1.curve25519-aes-sha2'
 local OLM_KEY = 'secr3t' -- TODO configurable using weechat sec data
 local v2_api_ns = '_matrix/client/v2_alpha'
@@ -596,7 +596,7 @@ function real_http_cb(data, command, rc, stdout, stderr)
                     -- First try to create session from saved data
                     -- if that doesn't success we will download otk
                     SERVER.olm.create_session(k, device_id)
-                    local pickle = SERVER.olm.sessions[k..':'..device_id]
+                    local pickle = SERVER.olm.get_session(k, device_id)
                     if not pickle then
                         perr('olm: Downloading otk for user '..k..', and device_id: '..device_id)
                         SERVER.olm.claim(k, device_id)
@@ -701,11 +701,16 @@ MatrixServer.create = function()
              otks={}
          }
          olmdata.save = function()
+             -- Save account and every pickled session
              local pickle, err = account:pickle(OLM_KEY)
              perr(err)
-             local fd = io.open(homedir..'account.olm', 'wb')
+             local fd = io.open(HOMEDIR..'account.olm', 'wb')
              fd:write(pickle)
              fd:close()
+             for key, pickled in pairs(olmdata.sessions) do
+                 local user_id, device_id = key:match('(.*):(.+)')
+                 olmdata.write_session_to_file(pickled, user_id, device_id)
+             end
          end
          olmdata.query = function(user_ids) -- Query keys from other user_id
              if DEBUG then
@@ -816,16 +821,9 @@ MatrixServer.create = function()
                  perr(('olm: missing device data for user: %s, and device: %s'):format(user_id, device_id))
                  return
              end
-             -- Frist try to unpickle session from filesystem
-             local session_filename = homedir..user_id..'.'..device_id..'.session.olm'
-             local fd, err = io.open(session_filename, 'rb')
-             if fd then
-                 perr(('olm: found saved session user: %s, and device: %s'):format(user_id, device_id))
-                 local pickled = fd:read'*all'
-                 olmdata.sessions[user_id..':'..device_id] = pickled
-                 fd:close()
-             else
-                 perr(('olm: saving new session for: %s, and device: %s'):format(user_id, device_id))
+             local pickled = olmdata.get_session(user_id, device_id)
+             if not pickled then
+                 perr(('olm: creating NEW session for: %s, and device: %s'):format(user_id, device_id))
                  local session = olm.Session.new()
                  local otk = olmdata.otks[user_id..':'..device_id]
                  if not otk then
@@ -841,22 +839,47 @@ MatrixServer.create = function()
                      session:create_outbound(olmdata.account, id_key, otk)
                      local session_id = session:session_id()
                      perr('Session ID:'..tostring(session_id))
-                     local pickled = session:pickle(OLM_KEY)
-                     olmdata.sessions[user_id..':'..device_id] = pickled
-                     local fd, err = io.open(session_filename, 'wb')
-                     if fd then
-                         fd:write(pickled)
-                         fd:close()
-                     else
-                         perr('olm: error saving session: '..tostring(err))
-                     end
+                     olmdata.store_session(session, user_id, device_id)
                  end
                  session:clear()
              end
          end
+         olmdata.get_session = function(user_id, device_id)
+             local pickled = olmdata.sessions[user_id..':'..device_id]
+             if not pickled then
+                 pickled = olmdata.read_session(user_id, device_id)
+             end
+             return pickled
+         end
+         olmdata.read_session = function(user_id, device_id)
+             local session_filename = HOMEDIR..user_id..'.'..device_id..'.session.olm'
+             local fd, err = io.open(session_filename, 'rb')
+             if fd then
+                 perr(('olm: reading saved session user: %s, and device: %s'):format(user_id, device_id))
+                 local pickled = fd:read'*all'
+                 olmdata.sessions[user_id..':'..device_id] = pickled
+                 fd:close()
+                 return pickled
+             end
+         end
+         olmdata.store_session = function(session, user_id, device_id)
+             local pickled = session:pickle(OLM_KEY)
+             olmdata.sessions[user_id..':'..device_id] = pickled
+             olmdata.write_session_to_file(pickled, user_id, device_id)
+         end
+         olmdata.write_session_to_file = function(pickled, user_id, device_id)
+             local session_filename = HOMEDIR..user_id..'.'..device_id..'.session.olm'
+             local fd, err = io.open(session_filename, 'wb')
+             if fd then
+                 fd:write(pickled)
+                 fd:close()
+             else
+                 perr('olm: error saving session: '..tostring(err))
+             end
+         end
          server.olm = olmdata
          -- Try to read account from filesystem, if not generate a new account
-         local fd = io.open(homedir..'account.olm', 'rb')
+         local fd = io.open(HOMEDIR..'account.olm', 'rb')
          local pickled = ''
          if fd then
              pickled = fd:read'*all'
@@ -1145,7 +1168,7 @@ function send(data, calls)
             local room = SERVER.rooms[id]
             for user_id, _ in pairs(room.users) do
                 for device_id, device_data in pairs(olmd.device_keys[user_id] or {}) do -- FIXME check for missing keys?
-                    local pickled = olmd.sessions[user_id..':'..device_id]
+                    local pickled = olmd.get_session(user_id, device_id)
                     if pickled then
                         local session = olm.Session.new()
                         session:unpickle(OLM_KEY, pickled)
@@ -1153,19 +1176,21 @@ function send(data, calls)
                         perr('Session ID:'..tostring(session_id))
                         local payload = {
                             room_id = room.identifier,
-                            ['type']="m.room.message",
-                            fingerprint="", -- TODO: Olm:sha256 participants
+                            ['type'] = "m.room.message",
+                            fingerprint = "", -- TODO: Olm:sha256 participants
                             sender_device = olmd.device_id,
                             content = {
-                                msgtype=msgtype,
-                                body=data.postfields.body or ''
+                                msgtype = msgtype,
+                                body = data.postfields.body or ''
                             }
                         }
-                        local message_type, encrypted_body = session:encrypt(json.encode(payload))
-                        session:clear()
                         -- encrypt body
+                        local message_type, encrypted_body = session:encrypt(json.encode(payload))
+                        -- Save session
+                        olmd.store_session(session, user_id, device_id)
+                        session:clear()
                         local ciphertext = {
-                            ["type"] = tonumber(message_type),
+                            ["type"] = message_type,
                             body = encrypted_body
                         }
                         local device_key
@@ -1776,41 +1801,56 @@ function Room:parseChunk(chunk, backlog, chunktype)
             return
         end
 
-        if chunk['type'] == 'm.room.encrypted' then
+        if chunk['type'] == 'm.room.encrypted' and olmstatus then
             tag{'no_log'} -- Don't log encrypted message
             content.body = 'encrypted message, unable to decrypt'
-            if olmstatus then
-                -- Find our id
-                local ciphertexts = content.ciphertext
-                local ciphertext
-                if not ciphertexts then
-                    content.body = 'Recieved an encrypted message, but could not find ciphertext array'
-                else
-                    ciphertext = ciphertexts[SERVER.olm.device_key]
-                end
-                if not ciphertext then
-                    content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
-                else
-                    local session = olm.Session.new()
+            -- Find our id
+            local ciphertexts = content.ciphertext
+            local ciphertext
+            if not ciphertexts then
+                content.body = 'Recieved an encrypted message, but could not find ciphertext array'
+            else
+                ciphertext = ciphertexts[SERVER.olm.device_key]
+            end
+            if not ciphertext then
+                content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
+            else
+                local session = olm.Session.new()
+                if ciphertext.type == 0 then
                     local inbound, err = session:create_inbound(SERVER.olm.account, ciphertext.body)
-                    local decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
-                    session:clear()
-                    if err then
-                        content.body = "Decryption error: "..err
+                else
+                    session:unpickle(OLM_KEY, SERVER.olm.get_session(SERVER.user_id, SERVER.olm.device_id))
+                end
+                local decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
+                if err then
+                    content.body = "Decryption error: "..err
+                end
+                local session_id = session:session_id()
+                perr('Session ID:'..tostring(session_id))
+                if ciphertext.type == 0 then
+                    --SERVER.olm.account:remove_one_time_keys(session)
+                end
+                SERVER.olm.store_session(session, SERVER.user_id, SERVER.olm.device_id)
+                session:clear()
+                if err then
+                    content.body = "Decryption error: "..err
+                else
+                    local success, payload = pcall(json.decode, decrypted)
+                    if not success then
+                        content.body = "Payload error: "..payload
                     else
-                        local success, payload = pcall(json.decode, decrypted)
-                        if not success then
-                            content.body = "Payload error: "..payload
-                        else
-                            content.msgtype = payload.content.msgtype
-                            -- Style the message so user can tell if it's
-                            -- an encrypted message or not
-                            local color = w.color(w.config_get_plugin(
-                                'encrypted_message_color'))
-                            content.body = color .. payload.content.body
-                        end
+                        content.msgtype = payload.content.msgtype
+                        -- Style the message so user can tell if it's
+                        -- an encrypted message or not
+                        local color = w.color(w.config_get_plugin(
+                            'encrypted_message_color'))
+                        content.body = color .. payload.content.body
                     end
                 end
+            end
+        else
+            if not olmstatus then
+                content.body = 'encrypted message, unable to decrypt'
             end
         end
 
@@ -2526,7 +2566,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     end
     errprefix = wconf'weechat.look.prefix_error'
     errprefix_c = wcolor'weechat.color.chat_prefix_error'
-    homedir = w.info_get('weechat_dir', '') .. '/'
+    HOMEDIR = w.info_get('weechat_dir', '') .. '/'
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
         'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'invite', 'nick',
