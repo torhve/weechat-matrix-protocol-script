@@ -101,6 +101,12 @@ size_t olm_create_inbound_session(
     OlmAccount * account,
     void * one_time_key_message, size_t message_length
 );
+size_t olm_create_inbound_session_from(
+    OlmSession * session,
+    OlmAccount * account,
+    void const * their_identity_key, size_t their_identity_key_length,
+    void * one_time_key_message, size_t message_length
+);
 size_t olm_decrypt_max_plaintext_length(
     OlmSession * session,
     size_t message_type,
@@ -366,6 +372,16 @@ function Session:create_inbound(account, one_time_key_message)
     )
 end
 
+function Session:create_inbound_from(account, identity_key, one_time_key_message)
+    local one_time_key_message_buffer = create_string(one_time_key_message)
+    return self:errcheck(olm.olm_create_inbound_session_from(
+        self.ptr,
+        account.ptr,
+        identity_key, #identity_key,
+        one_time_key_message_buffer, #one_time_key_message
+    ))
+end
+
 function Session:matches_inbound(one_time_key_message)
     local one_time_key_message_buffer = create_string(one_time_key_message)
     local matches = olm.olm_matches_inbound_session(
@@ -494,6 +510,7 @@ if test then
         bobs_ot_key = k
     end
     a_session:create_outbound(alice, bobs_id_key, bobs_ot_key)
+    bob:remove_one_time_keys(b_session)
     local secret_message = 'why not zoidberg?'
     message_1_type, message_1_body = a_session:encrypt(secret_message)
 
@@ -503,10 +520,10 @@ if test then
     print( 'Decrypted message: ', decrypted)
     assert(secret_message == decrypted)
 
+
+    b_session:create_inbound_from(bob, a_keys.curve25519, message_1_body)
+
     bob:mark_keys_as_published()
-
-    bob:remove_one_time_keys(b_session)
-
     print('A session id: ', a_session:session_id())
     for i=1,10000 do
         Account.new():clear()
