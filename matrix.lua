@@ -595,9 +595,9 @@ function real_http_cb(data, command, rc, stdout, stderr)
                 for device_id, device_data in pairs(v) do
                     -- First try to create session from saved data
                     -- if that doesn't success we will download otk
-                    SERVER.olm.create_session(k, device_id)
-                    local pickle = SERVER.olm.get_session(k, device_id)
-                    if not pickle then
+                    local device_key = device_data.keys['curve25519:'..device_id]
+                    local sessions = SERVER.olm.get_sessions(device_key)
+                    if #sessions == 0 then
                         perr('olm: Downloading otk for user '..k..', and device_id: '..device_id)
                         SERVER.olm.claim(k, device_id)
                     else
@@ -707,10 +707,10 @@ MatrixServer.create = function()
              local fd = io.open(HOMEDIR..'account.olm', 'wb')
              fd:write(pickle)
              fd:close()
-             for key, pickled in pairs(olmdata.sessions) do
-                 local user_id, device_id = key:match('(.*):(.+)')
-                 olmdata.write_session_to_file(pickled, user_id, device_id)
-             end
+             --for key, pickled in pairs(olmdata.sessions) do
+             --    local user_id, device_id = key:match('(.*):(.+)')
+             --    olmdata.write_session_to_file(pickled, user_id, device_id)
+             --end
          end
          olmdata.query = function(user_ids) -- Query keys from other user_id
              if DEBUG then
@@ -821,8 +821,13 @@ MatrixServer.create = function()
                  perr(('olm: missing device data for user: %s, and device: %s'):format(user_id, device_id))
                  return
              end
-             local pickled = olmdata.get_session(user_id, device_id)
-             if not pickled then
+             local device_key = device_data.keys['curve25519:'..device_id]
+             if not device_key then
+                 perr("olm: Missing key for user: "..user_id.." and device: "..device_id.."")
+                 return
+             end
+             local sessions = olmdata.get_sessions(device_key)
+             if true then -- TODO
                  perr(('olm: creating NEW session for: %s, and device: %s'):format(user_id, device_id))
                  local session = olm.Session.new()
                  local otk = olmdata.otks[user_id..':'..device_id]
@@ -831,53 +836,54 @@ MatrixServer.create = function()
                  else
                      otk = otk[device_id]
                  end
-                 local id_key = device_data.keys['curve25519:'..device_id]
-                 if not id_key then
-                     perr("olm: Missing key for user: "..user_id.." and device: "..device_id.."")
-                 end
-                 if id_key and otk then
-                     session:create_outbound(olmdata.account, id_key, otk)
+                 if otk then
+                     session:create_outbound(olmdata.account, device_key, otk)
                      local session_id = session:session_id()
                      perr('Session ID:'..tostring(session_id))
-                     olmdata.store_session(session, user_id, device_id)
+                     olmdata.store_session(device_key, session)
                  end
                  session:clear()
              end
          end
-         olmdata.get_session = function(user_id, device_id)
+         olmdata.get_sessions = function(device_key)
              if DEBUG then
-                 perr("olm: get_session: "..user_id.." and device: "..device_id.."")
+                 perr("olm: get_sessions: device: "..device_key.."")
              end
-             local pickled = olmdata.sessions[user_id..':'..device_id]
-             if not pickled then
-                 pickled = olmdata.read_session(user_id, device_id)
+             local sessions = olmdata.sessions[device_key]
+             if not sessions then
+                 sessions = olmdata.read_session(device_key)
              end
-             return pickled
+             return sessions
          end
-         olmdata.read_session = function(user_id, device_id)
-             local session_filename = HOMEDIR..user_id..'.'..device_id..'.session.olm'
+         olmdata.read_session = function(device_key)
+             local session_filename = HOMEDIR..device_key..'.session.olm'
              local fd, err = io.open(session_filename, 'rb')
              if fd then
-                 perr(('olm: reading saved session user: %s, and device: %s'):format(user_id, device_id))
-                 local pickled = fd:read'*all'
-                 olmdata.sessions[user_id..':'..device_id] = pickled
+                 perr(('olm: reading saved session device: %s'):format(device_key))
+                 local sessions = fd:read'*all'
+                 local sessions = json.decode(sessions)
+                 olmdata.sessions[device_key] = sessions
                  fd:close()
-                 return pickled
+                 return sessions
              end
+             return {}
          end
-         olmdata.store_session = function(session, user_id, device_id)
+         olmdata.store_session = function(device_key, session)
+             local session_id = session:session_id()
              if DEBUG then
-                 perr("olm: store_session: "..user_id.." and device: "..device_id..", Session ID: "..session:session_id())
+                 perr("olm: store_session: device: "..device_key..", Session ID: "..session_id)
              end
+             local sessions = olmdata.sessions[device_key] or {}
              local pickled = session:pickle(OLM_KEY)
-             olmdata.sessions[user_id..':'..device_id] = pickled
-             olmdata.write_session_to_file(pickled, user_id, device_id)
+             sessions[session_id] = pickled
+             olmdata.sessions[device_key] = sessions
+             olmdata.write_session_to_file(sessions, device_key)
          end
-         olmdata.write_session_to_file = function(pickled, user_id, device_id)
-             local session_filename = HOMEDIR..user_id..'.'..device_id..'.session.olm'
+         olmdata.write_session_to_file = function(sessions, device_key)
+             local session_filename = HOMEDIR..device_key..'.session.olm'
              local fd, err = io.open(session_filename, 'wb')
              if fd then
-                 fd:write(pickled)
+                 fd:write(json.encode(sessions))
                  fd:close()
              else
                  perr('olm: error saving session: '..tostring(err))
@@ -1174,7 +1180,22 @@ function send(data, calls)
             local room = SERVER.rooms[id]
             for user_id, _ in pairs(room.users) do
                 for device_id, device_data in pairs(olmd.device_keys[user_id] or {}) do -- FIXME check for missing keys?
-                    local pickled = olmd.get_session(user_id, device_id)
+
+                    local device_key
+                    -- TODO save this better somehow?
+                    for key_id, key_data in pairs(device_data.keys) do
+                        if key_id:match('^curve25519') then
+                            device_key = key_data
+                        end
+                    end
+                    local sessions = olmd.get_sessions(device_key)
+                    -- Use the session with the lowest ID
+                    table.sort(sessions)
+                    local pickled
+                    for k, v in pairs(sessions) do
+                        pickled = v
+                        break
+                    end
                     if pickled then
                         local session = olm.Session.new()
                         session:unpickle(OLM_KEY, pickled)
@@ -1193,22 +1214,16 @@ function send(data, calls)
                         }
                         -- encrypt body
                         local mtype, e_body = session:encrypt(json.encode(payload))
-                        -- Save session
-                        olmd.store_session(session, user_id, device_id)
-                        session:clear()
                         local ciphertext = {
                             ["type"] = mtype,
                             body = e_body
                         }
-                        local device_key
-                        -- TODO save this better somehow?
-                        for key_id, key_data in pairs(device_data.keys) do
-                            if key_id:match('^curve25519') then
-                                device_key = key_data
-                            end
-                        end
                         data.postfields.ciphertext[device_key] = ciphertext
                         recipient_count = recipient_count + 1
+
+                        -- Save session
+                        olmd.store_session(device_key, session)
+                        session:clear()
                     end
                 end
             end
@@ -1811,7 +1826,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         if chunk['type'] == 'm.room.encrypted' and olmstatus then
             tag{'no_log'} -- Don't log encrypted message
             content.body = 'encrypted message, unable to decrypt'
-            local deviceKey = content.sender_key
+            local device_key = content.sender_key
             -- Find our id
             local ciphertexts = content.ciphertext
             local ciphertext
@@ -1824,15 +1839,18 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
             else
                 local session = olm.Session.new()
-                local pickled = SERVER.olm.get_session(
-                        SERVER.user_id, SERVER.olm.device_id)
-                perr('Pickled: '..pickled)
+                local sessions = SERVER.olm.get_sessions(device_key)
+                local pickled
+                for id, pickle in pairs(sessions) do
+                    pickled = pickle
+                    perr('Pickled: '..pickle)
+                end
                 if pickled then
                     session:unpickle(OLM_KEY, pickled)
                 end
                 if ciphertext.type == 0 then
                     local inbound, err = session:create_inbound_from(
-                        SERVER.olm.account, deviceKey, ciphertext.body)
+                        SERVER.olm.account, device_key, ciphertext.body)
                 else
                     --local pickled = SERVER.olm.get_session(
                     --        SERVER.user_id, SERVER.olm.device_id)
@@ -1850,7 +1868,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     -- TODO
                     --SERVER.olm.account:remove_one_time_keys(session)
                 end
-                SERVER.olm.store_session(session, SERVER.user_id, SERVER.olm.device_id)
+                SERVER.olm.store_session(device_key, session)
                 session:clear()
                 if err then
                     content.body = "Decryption error: "..err
