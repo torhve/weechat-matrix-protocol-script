@@ -845,6 +845,9 @@ MatrixServer.create = function()
              end
          end
          olmdata.get_session = function(user_id, device_id)
+             if DEBUG then
+                 perr("olm: get_session: "..user_id.." and device: "..device_id.."")
+             end
              local pickled = olmdata.sessions[user_id..':'..device_id]
              if not pickled then
                  pickled = olmdata.read_session(user_id, device_id)
@@ -863,6 +866,9 @@ MatrixServer.create = function()
              end
          end
          olmdata.store_session = function(session, user_id, device_id)
+             if DEBUG then
+                 perr("olm: store_session: "..user_id.." and device: "..device_id..", Session ID: "..session:session_id())
+             end
              local pickled = session:pickle(OLM_KEY)
              olmdata.sessions[user_id..':'..device_id] = pickled
              olmdata.write_session_to_file(pickled, user_id, device_id)
@@ -1173,7 +1179,8 @@ function send(data, calls)
                         local session = olm.Session.new()
                         session:unpickle(OLM_KEY, pickled)
                         local session_id = session:session_id()
-                        perr('Session ID:'..tostring(session_id))
+                        perr(('Session ID: %s, user_id: %s, device_id: %s'):
+                            format(session_id, user_id, device_id))
                         local payload = {
                             room_id = room.identifier,
                             ['type'] = "m.room.message",
@@ -1185,13 +1192,13 @@ function send(data, calls)
                             }
                         }
                         -- encrypt body
-                        local message_type, encrypted_body = session:encrypt(json.encode(payload))
+                        local mtype, e_body = session:encrypt(json.encode(payload))
                         -- Save session
                         olmd.store_session(session, user_id, device_id)
                         session:clear()
                         local ciphertext = {
-                            ["type"] = message_type,
-                            body = encrypted_body
+                            ["type"] = mtype,
+                            body = e_body
                         }
                         local device_key
                         -- TODO save this better somehow?
@@ -1804,6 +1811,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         if chunk['type'] == 'm.room.encrypted' and olmstatus then
             tag{'no_log'} -- Don't log encrypted message
             content.body = 'encrypted message, unable to decrypt'
+            local deviceKey = content.sender_key
             -- Find our id
             local ciphertexts = content.ciphertext
             local ciphertext
@@ -1816,18 +1824,30 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
             else
                 local session = olm.Session.new()
-                if ciphertext.type == 0 then
-                    local inbound, err = session:create_inbound(SERVER.olm.account, ciphertext.body)
-                else
-                    session:unpickle(OLM_KEY, SERVER.olm.get_session(SERVER.user_id, SERVER.olm.device_id))
+                local pickled = SERVER.olm.get_session(
+                        SERVER.user_id, SERVER.olm.device_id)
+                perr('Pickled: '..pickled)
+                if pickled then
+                    session:unpickle(OLM_KEY, pickled)
                 end
+                if ciphertext.type == 0 then
+                    local inbound, err = session:create_inbound_from(
+                        SERVER.olm.account, deviceKey, ciphertext.body)
+                else
+                    --local pickled = SERVER.olm.get_session(
+                    --        SERVER.user_id, SERVER.olm.device_id)
+                    --session:unpickle(OLM_KEY, pickled)
+                end
+                perr(('Matches inbound: %s'):format(session:matches_inbound(ciphertext.body)))
                 local decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
                 if err then
                     content.body = "Decryption error: "..err
                 end
                 local session_id = session:session_id()
-                perr('Session ID:'..tostring(session_id))
+                perr(('Session ID: %s, user_id: %s, device_id: %s'):
+                    format(session_id, SERVER.user_id, SERVER.olm.device_id))
                 if ciphertext.type == 0 then
+                    -- TODO
                     --SERVER.olm.account:remove_one_time_keys(session)
                 end
                 SERVER.olm.store_session(session, SERVER.user_id, SERVER.olm.device_id)
