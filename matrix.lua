@@ -1764,6 +1764,99 @@ function Room:formatNick(user_id)
     return nick_f
 end
 
+function Room:decryptChunk(chunk)
+    perr('____******___:' ..chunk.event_id)
+    -- vector client doesn't provide this
+    chunk.content.msgtype = 'm.text'
+
+    if not olmstatus then
+        chunk.content.body = 'encrypted message, unable to decrypt'
+        return chunk
+    end
+
+    chunk.content.body = 'encrypted message, unable to decrypt'
+    local device_key = chunk.content.sender_key
+    -- Find our id
+    local ciphertexts = chunk.content.ciphertext
+    local ciphertext
+    if not ciphertexts then
+        chunk.content.body = 'Recieved an encrypted message, but could not find ciphertext array'
+    else
+        ciphertext = ciphertexts[SERVER.olm.device_key]
+    end
+    if not ciphertext then
+        chunk.content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
+        return chunk
+    end
+
+    local session
+    local decrypted
+    local err
+    local found_session = false
+    local sessions = SERVER.olm.get_sessions(device_key)
+    for id, pickle in pairs(sessions) do
+        session = olm.Session.new()
+        session:unpickle(OLM_KEY, pickle)
+        local matches_inbound = session:matches_inbound(ciphertext.body)
+        perr(('%s : |%s| : inbound match'):format(session:session_id(), matches_inbound))
+        if ciphertext.type == 0 and matches_inbound then
+            found_session = true
+        end
+        decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
+        if not err then
+            perr(('Able to decrypt with an existing session!'))
+            SERVER.olm.store_session(device_key, session)
+        else
+            chunk.content.body = "Decryption error: "..err
+            perr(('Unable to decrypt with an existing session: ' .. err))
+        end
+        session:clear()
+    end
+    if ciphertext.type == 0 and not found_session and not decrypted then
+        session = olm.Session.new()
+        local inbound, err = session:create_inbound_from(
+        SERVER.olm.account, device_key, ciphertext.body)
+        if err then
+            session:clear()
+            chunk.content.body = "Decryption error: create inbound "..err
+            return chunk
+        end
+        decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
+        if err then
+            session:clear()
+            chunk.content.body = "Decryption error: "..err
+            return chunk
+        end
+        -- TODO SERVER.olm.account:remove_one_time_keys(session)
+        local session_id = session:session_id()
+        perr(('Session ID: %s, user_id: %s, device_id: %s'):
+        format(session_id, SERVER.user_id, SERVER.olm.device_id))
+        SERVER.olm.store_session(device_key, session)
+        session:clear()
+        if err then
+            chunk.content.body = "Decryption error: "..err
+            return chunk
+        end
+    end
+
+    if decrypted then
+        local success, payload = pcall(json.decode, decrypted)
+        if not success then
+            chunk.content.body = "Payload error: "..payload
+            return chunk
+        end
+        -- TODO use the room id from payload for security
+        chunk.content.msgtype = payload.content.msgtype
+        -- Style the message so user can tell if it's
+        -- an encrypted message or not
+        local color = w.color(w.config_get_plugin(
+            'encrypted_message_color'))
+        chunk.content.body = color .. payload.content.body
+    end
+
+    return chunk
+end
+
 -- Parses a chunk of json meant for a room
 function Room:parseChunk(chunk, backlog, chunktype)
     local taglist = {}
@@ -1804,13 +1897,13 @@ function Room:parseChunk(chunk, backlog, chunktype)
     tag{chunk.event_id}
 
     if chunk['type'] == 'm.room.message' or chunk['type'] == 'm.room.encrypted' then
-        if not backlog and not is_self then
-            tag'notify_message'
+        if chunk['type'] == 'm.room.encrypted'  then
+            tag{'no_log'} -- Don't log encrypted message
+            chunk = self:decryptChunk(chunk)
         end
 
-        if chunk['type'] == 'm.room.encrypted' then
-            -- vector client doesn't provide this
-            chunk.content.msgtype = 'm.text'
+        if not backlog and not is_self then
+            tag'notify_message'
         end
 
         local time_int = chunk['origin_server_ts']/1000
@@ -1821,75 +1914,6 @@ function Room:parseChunk(chunk, backlog, chunktype)
         if not content['msgtype'] then
             -- We don't support redactions
             return
-        end
-
-        if chunk['type'] == 'm.room.encrypted' and olmstatus then
-            tag{'no_log'} -- Don't log encrypted message
-            content.body = 'encrypted message, unable to decrypt'
-            local device_key = content.sender_key
-            -- Find our id
-            local ciphertexts = content.ciphertext
-            local ciphertext
-            if not ciphertexts then
-                content.body = 'Recieved an encrypted message, but could not find ciphertext array'
-            else
-                ciphertext = ciphertexts[SERVER.olm.device_key]
-            end
-            if not ciphertext then
-                content.body = 'Recieved an encrypted message, but could not find cipher for ourselves from the sender.'
-            else
-                local session = olm.Session.new()
-                local sessions = SERVER.olm.get_sessions(device_key)
-                local pickled
-                for id, pickle in pairs(sessions) do
-                    pickled = pickle
-                    perr('Pickled: '..pickle)
-                end
-                if pickled then
-                    session:unpickle(OLM_KEY, pickled)
-                end
-                if ciphertext.type == 0 then
-                    local inbound, err = session:create_inbound_from(
-                        SERVER.olm.account, device_key, ciphertext.body)
-                else
-                    --local pickled = SERVER.olm.get_session(
-                    --        SERVER.user_id, SERVER.olm.device_id)
-                    --session:unpickle(OLM_KEY, pickled)
-                end
-                perr(('Matches inbound: %s'):format(session:matches_inbound(ciphertext.body)))
-                local decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
-                if err then
-                    content.body = "Decryption error: "..err
-                end
-                local session_id = session:session_id()
-                perr(('Session ID: %s, user_id: %s, device_id: %s'):
-                    format(session_id, SERVER.user_id, SERVER.olm.device_id))
-                if ciphertext.type == 0 then
-                    -- TODO
-                    --SERVER.olm.account:remove_one_time_keys(session)
-                end
-                SERVER.olm.store_session(device_key, session)
-                session:clear()
-                if err then
-                    content.body = "Decryption error: "..err
-                else
-                    local success, payload = pcall(json.decode, decrypted)
-                    if not success then
-                        content.body = "Payload error: "..payload
-                    else
-                        content.msgtype = payload.content.msgtype
-                        -- Style the message so user can tell if it's
-                        -- an encrypted message or not
-                        local color = w.color(w.config_get_plugin(
-                            'encrypted_message_color'))
-                        content.body = color .. payload.content.body
-                    end
-                end
-            end
-        else
-            if not olmstatus then
-                content.body = 'encrypted message, unable to decrypt'
-            end
         end
 
         if content['msgtype'] == 'm.text' then
