@@ -181,18 +181,12 @@ size_t olm_remove_one_time_keys(
 local olm = ffi.load('libolm')
 local ERR = olm.olm_error()
 
--- Save C string buffer to a table so the garbage collector does not clean
--- the buffers before the olm library is done reading and writing to them
--- TODO: this could be saved per account or per session and cleaned when
--- user of library calls clean
-local strings = {}
-
-local function create_string_buffer(arg)
+local function create_string_buffer(obj, arg)
     -- most of the API calls return ULL which is of type cdata, we can convert to lua numbers using tonumber
     -- with regular Lua FFI type is userdata
     if type(arg) == 'number' or type(arg) == 'cdata' or type(arg) == 'userdata' then
         local buf = ffi.new("uint8_t[?]", tonumber(arg))
-        table.insert(strings, buf)
+        table.insert(obj.strings, buf)
         return buf
     end
     return arg
@@ -226,7 +220,12 @@ Account.new = function()
     local account = {}
     setmetatable(account, Account)
     local size = tonumber(olm.olm_account_size())
-    account.ptr = olm.olm_account(create_string_buffer(size))
+
+    -- Save C string buffer to a table so the garbage collector does not clean
+    -- the buffers before the olm library is done reading and writing to them
+    -- TODO: check why this is needed
+    account.strings = {}
+    account.ptr = olm.olm_account(create_string_buffer(account, size))
     return account
 end
 
@@ -259,7 +258,7 @@ function Account:identity_keys()
         return out_length, err
     end
     out_length = tonumber(out_length)
-    local out_buffer = create_string_buffer(out_length)
+    local out_buffer = create_string_buffer(self, out_length)
     local ret, err = self:errcheck(olm.olm_account_identity_keys(self.ptr, out_buffer, out_length))
     if err then
         return '', err
@@ -270,8 +269,8 @@ end
 
 function Account:sign(message)
     local out_length = tonumber(olm.olm_account_signature_length(self.ptr))
-    local message_buffer = create_string_buffer(message)
-    local out_buffer = create_string_buffer(out_length)
+    local message_buffer = create_string_buffer(self, message)
+    local out_buffer = create_string_buffer(self, out_length)
     olm.olm_account_sign(
         self.ptr, message_buffer, len(message), out_buffer, out_length
     )
@@ -280,7 +279,7 @@ end
 
 function Account:one_time_keys()
     local out_length = tonumber(olm.olm_account_one_time_keys_length(self.ptr))
-    local out_buffer = create_string_buffer(out_length)
+    local out_buffer = create_string_buffer(self, out_length)
     local ret, err = olm.olm_account_one_time_keys(self.ptr, out_buffer, out_length)
     if err then return '', err end
     local out = ffi.string(out_buffer, out_length)
@@ -296,9 +295,9 @@ function Account:generate_one_time_keys(count)
 end
 
 function Account:pickle(key)
-    local key_buffer = create_string_buffer(key)
+    local key_buffer = create_string_buffer(self, key)
     local pickle_length = tonumber(olm.olm_pickle_account_length(self.ptr))
-    local pickle_buffer = create_string_buffer(pickle_length)
+    local pickle_buffer = create_string_buffer(self, pickle_length)
     local ret, err = olm.olm_pickle_account(
         self.ptr, key_buffer, #key, pickle_buffer, pickle_length
     )
@@ -330,13 +329,20 @@ Session.__index = Session
 Session.new = function()
     local session = {}
     setmetatable(session, Session)
-    local buf = create_string_buffer(olm.olm_session_size())
+    session.strings = {}
+    local buf = create_string_buffer(session, tonumber(olm.olm_session_size()))
     session.ptr = olm.olm_session(buf)
     return session
 end
 
 function Session:clear()
-    return olm.olm_clear_session(self.ptr)
+    local ret, err = self:errcheck(olm.olm_clear_session(self.ptr))
+    if err then return nil, err end
+    -- Save C string buffer to a table so the garbage collector does not clean
+    -- the buffers before the olm library is done reading and writing to them
+    -- TODO: check why this is needed
+    self.strings = {}
+    return ret
 end
 
 function Session:errcheck(val)
@@ -396,7 +402,7 @@ end
 
 function Session:session_id()
     local id_length = tonumber(olm.olm_session_id_length(self.ptr))
-    local id_buffer = create_string_buffer(id_length)
+    local id_buffer = create_string_buffer(self, id_length)
     local ret, err = self:errcheck(olm.olm_session_id(self.ptr, id_buffer, id_length))
     if err then return ret, err end
     local ret = ffi.string(id_buffer, id_length)
@@ -411,7 +417,7 @@ function Session:encrypt(plaintext)
     local message_length = tonumber(olm.olm_encrypt_message_length(
         self.ptr, #plaintext
     ))
-    local message_buffer = create_string_buffer(message_length)
+    local message_buffer = create_string_buffer(self, message_length)
 
     olm.olm_encrypt(
         self.ptr,
@@ -430,7 +436,7 @@ function Session:decrypt(message_type, message)
     ))
     if err then return nil, err end
     max_plaintext_length = tonumber(max_plaintext_length)
-    local plaintext_buffer = create_string_buffer(max_plaintext_length)
+    local plaintext_buffer = create_string_buffer(self, max_plaintext_length)
     local message_buffer = create_string(message)
     local plaintext_length, err = self:errcheck(olm.olm_decrypt(
         self.ptr, message_type, message_buffer, #message,
@@ -442,9 +448,9 @@ function Session:decrypt(message_type, message)
 end
 
 function Session:pickle(key)
-    local key_buffer = create_string_buffer(key)
+    local key_buffer = create_string_buffer(self, key)
     local pickle_length = tonumber(olm.olm_pickle_session_length(self.ptr))
-    local pickle_buffer = create_string_buffer(pickle_length)
+    local pickle_buffer = create_string_buffer(self, pickle_length)
     olm.olm_pickle_session(
         self.ptr, key_buffer, len(key), pickle_buffer, pickle_length
     )
@@ -463,6 +469,8 @@ end
 local test = arg and arg[1] and arg[1] == '--test'
 if test then
     local json = require'cjson'
+    local key = 'test'
+
     alice = Account.new()
     a_session = Session.new()
     bob = Account.new()
@@ -472,7 +480,6 @@ if test then
 
 
 
-    local key = 'test'
     local pickle = alice:pickle(key)
 
     local a_keys = json.decode(alice:identity_keys())
