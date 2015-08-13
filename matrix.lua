@@ -1413,6 +1413,9 @@ Room.create = function(obj)
     if not room.name then
         room.name = room.identifier
     end
+    if not room.server then
+        room.server = ''
+    end
     room.visibility = obj.visibility
     if not obj['visibility'] then
         room.visibility = 'public'
