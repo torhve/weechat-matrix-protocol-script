@@ -1772,7 +1772,6 @@ function Room:formatNick(user_id)
 end
 
 function Room:decryptChunk(chunk)
-    perr('____******___:' ..chunk.event_id)
     -- vector client doesn't provide this
     chunk.content.msgtype = 'm.text'
 
