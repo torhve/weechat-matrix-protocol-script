@@ -1404,10 +1404,12 @@ Room.create = function(obj)
     room.encrypted = false
     -- We might not be a member yet
     local state_events = obj.state or {}
-    for _, state in pairs(state_events) do
+    for _, state in ipairs(state_events) do
         if state['type'] == 'm.room.aliases' then
-            local name = state['content']['aliases'][1] or ''
-            room.name, room.server = name:match('(.+):(.+)')
+            for _, name in ipairs(state.content.aliases or {}) do
+                room.name, room.server = name:match('(.+):(.+)')
+                break -- Use first
+            end
         end
     end
     if not room.name then
@@ -2005,8 +2007,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
             data)
     elseif chunk['type'] == 'm.room.name' then
         local name = chunk['content']['name']
-        self.roomname = name
         if name ~= '' or name ~= json.null then
+            self.roomname = name
             self:setName(name)
         end
     elseif chunk['type'] == 'm.room.member' then
