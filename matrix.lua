@@ -614,7 +614,9 @@ function real_http_cb(data, command, rc, stdout, stderr)
                 key_count = count
                 SERVER.olm.key_count = key_count
             end
-            perr('olm: Number of own OTKs uploaded to server: '..key_count)
+            if DEBUG then
+                perr('olm: Number of own OTKs uploaded to server: '..key_count)
+            end
             -- TODO make endless loop prevention in case of server error
             if key_count < sensible_number_of_keys then
                 SERVER.olm.upload_keys()
