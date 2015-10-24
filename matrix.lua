@@ -1973,7 +1973,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         backlog_lines= {'120', 'Number of lines to fetch from backlog upon connecting'},
         autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
-        local_echo = {'on', 'Print lines locally instead of waiting for resturn from server'},
+        local_echo = {'on', 'Print lines locally instead of waiting for return from server'},
     }
     -- set default settings
     local version = w.info_get('version_number', '') or 0
