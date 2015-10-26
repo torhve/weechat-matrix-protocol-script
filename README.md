@@ -92,6 +92,13 @@ unofficial packages [here](https://weechat.org/download/debian/).
 
 ## How to get WeeChat & Lua deps up and running on OSX:
 
+### using brew:
+```bash
+brew install luarocks
+brew install weechat --with-lua
+```
+
+### using MacPorts:
 ```bash
 sudo port install weechat +lua
 sudo port install luarocks
