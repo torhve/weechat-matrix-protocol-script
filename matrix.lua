@@ -642,16 +642,20 @@ function real_http_cb(data, command, rc, stdout, stderr)
         elseif command:find'/publicRooms' then
             mprint 'Public rooms:'
             mprint '\tName\tUsers\tTopic\tAliases'
-            for _, r in pairs(js.chunk) do
+            for _, r in ipairs(js.chunk) do
                 local name = ''
                 if r.name ~= json.null then
                     name = r.name
+                end
+                local topic = ''
+                if r.topic ~= json.null then
+                    topic = r.topic
                 end
                 mprint(('%s %s %s %s')
                     :format(
                         name,
                         r.num_joined_members,
-                        r.topic,
+                        topic,
                         table.concat(r.aliases, ', ')))
             end
         elseif command:find'/invite' then
