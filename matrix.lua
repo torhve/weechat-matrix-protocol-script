@@ -447,7 +447,7 @@ function poll_cb(data, command, rc, stdout, stderr)
 end
 
 function real_http_cb(data, command, rc, stdout, stderr)
-    if stderr ~= '' then
+    if stderr and stderr ~= '' then
         mprint(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
     end
