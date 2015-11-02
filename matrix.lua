@@ -673,7 +673,9 @@ function real_http_cb(data, command, rc, stdout, stderr)
     return w.WEECHAT_RC_OK
 end
 function http_cb(data, command, rc, stdout, stderr)
-    ---return real_http_cb(data, command, rc, stdout, stderr)
+    if not DEBUG then
+        return real_http_cb(data, command, rc, stdout, stderr)
+    end
     local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
     if not status then
         perr('Error in http_cb: ' .. tostring(result))
