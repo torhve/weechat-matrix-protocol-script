@@ -926,7 +926,7 @@ MatrixServer.create = function()
              }}
          end
      else
-        w.print('', SCRIPT_NAME .. ': Unable to load olm encryption library. Not enabling encryption. Please see documentation (REDME.md) for information on how to enable.')
+        w.print('', SCRIPT_NAME .. ': Unable to load olm encryption library. Not enabling encryption. Please see documentation (README.md) for information on how to enable.')
      end
      return server
 end
