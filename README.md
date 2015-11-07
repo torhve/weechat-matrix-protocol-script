@@ -111,7 +111,7 @@ export LUA_CPATH="/opt/local/share/luarocks/lib/lua/5.2/?.so;$LUA_CPATH"
 
 Encryption support is work in progress, but the brave souls that can handle some nonstraighfoward installation and can live with potentially crashing WeeChats and other problems can try to follow the instructions below to get end-to-end encryption working.
 
-`matrix.lua` uses [olm](https://github.com/matrix-org/olm) C library to do encryption. That library needs to be downloaded, compiled and installed in a place Lua can find it.
+`matrix.lua` uses [olm](https://matrix.org/git/olm/) C library to do encryption. That library needs to be downloaded, compiled and installed in a place Lua can find it.
 The Lua binding is written using FFI, which means you *either* have to compile WeeChat against LuaJIT (which is not the standard!) or you will have to install FFI for regular Lua.
 [LuaFFI](https://github.com/jmckaskill/luaffi) can be found [here](https://github.com/jmckaskill/luaffi). It needs to be downloaded, compiled and installed in a place Lua can find it.
 If you decide to recompile WeeChat instead, the `cmake` incantation you need is `cmake ..  -DCMAKE_BUILD_TYPE=Debug -DLUA_INCLUDE_DIRS=/usr/include/luajit-2.0 -DLUA_LDFLAGS=/usr/lib/x86_64-linux-gnu/libluajit-5.1.so`
