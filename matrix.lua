@@ -1,4 +1,5 @@
 -- WeeChat Matrix.org Client
+-- vim: expandtab:ts=4:sw=4:sts=4
 
 --[[
  Author: xt <xt@xt.gg>
@@ -398,7 +399,7 @@ function poll_cb(data, command, rc, stdout, stderr)
             if js['end'] then
                 SERVER.end_token = js['end']
             end
-            for _, chunk in pairs(js.chunk or {}) do
+            for _, chunk in ipairs(js.chunk or {}) do
                 if chunk.room_id then
                     local room = SERVER.rooms[chunk['room_id']]
                     if room then
@@ -496,10 +497,10 @@ function real_http_cb(data, command, rc, stdout, stderr)
             SERVER:initial_sync()
         elseif command:find'/rooms/.*/initialSync' then
             local myroom = SERVER:addRoom(js)
-            for _, chunk in pairs(js['presence']) do
+            for _, chunk in ipairs(js['presence']) do
                 myroom:parseChunk(chunk, true, 'presence')
             end
-            for _, chunk in pairs(js['messages']['chunk']) do
+            for _, chunk in ipairs(js['messages']['chunk']) do
                 myroom:parseChunk(chunk, true, 'messages')
             end
         elseif command:find'v1/initialSync' then
@@ -507,26 +508,29 @@ function real_http_cb(data, command, rc, stdout, stderr)
             -- so when the nicks get added to the room they can get added to
             -- the correct nicklist group according to if they have presence
             -- or not
-            for _, chunk in pairs(js.presence) do
+            for _, chunk in ipairs(js.presence) do
                 SERVER:UpdatePresence(chunk.content)
             end
-            for _, room in pairs(js['rooms']) do
-                local myroom = SERVER:addRoom(room)
+            for _, room in ipairs(js['rooms']) do
+                -- If we left the room, simply ignore it
+                if room.membership ~= 'leave' then
+                    local myroom = SERVER:addRoom(room)
 
-                -- Parse states before messages so we can add nicks and stuff
-                -- before messages start appearing
-                local states = room.state
-                if states then
-                    local chunks = room.state or {}
-                    for _, chunk in pairs(chunks) do
-                        myroom:parseChunk(chunk, true, 'states')
+                    -- Parse states before messages so we can add nicks and stuff
+                    -- before messages start appearing
+                    local states = room.state
+                    if states then
+                        local chunks = room.state or {}
+                        for _, chunk in ipairs(chunks) do
+                            myroom:parseChunk(chunk, true, 'states')
+                        end
                     end
-                end
-                local messages = room.messages
-                if messages then
-                    local chunks = messages.chunk or {}
-                    for _, chunk in pairs(chunks) do
-                        myroom:parseChunk(chunk, true, 'messages')
+                    local messages = room.messages
+                    if messages then
+                        local chunks = messages.chunk or {}
+                        for _, chunk in ipairs(chunks) do
+                            myroom:parseChunk(chunk, true, 'messages')
+                        end
                     end
                 end
             end
