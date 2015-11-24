@@ -663,6 +663,8 @@ function real_http_cb(data, command, rc, stdout, stderr)
             end
         elseif command:find'/invite' then
             local room_id = js.room_id
+        elseif command:find'receipt' then
+            -- we don't care about receipts for now
         else
             dbg{['error'] = {msg='Unknown command in http cb', command=command,
                 js=js}}
@@ -1059,6 +1061,20 @@ function MatrixServer:delRoom(room_id)
             break
         end
     end
+end
+
+function MatrixServer:SendReadReceipt(room_id, event_id)
+    -- TODO: prevent sending multiple identical read receipts
+    local r_type = 'm.read'
+    local auth = urllib.urlencode{access_token=self.access_token}
+    room_id = urllib.quote(room_id)
+    event_id = urllib.quote(event_id)
+    local url = '/rooms/'..room_id..'/receipt/'..r_type..'/'..event_id..'?'..auth
+    http(url,
+      {customrequest = 'POST'},
+      'http_cb',
+      5*1000, nil,
+      v2_api_ns )
 end
 
 function MatrixServer:Msg(room_id, body, msgtype)
@@ -2180,6 +2196,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
     elseif chunk['type'] == 'm.room.history_visibility' then
         self.history_visibility = chunk.content.history_visibility
+    elseif chunk['type'] == 'm.receipt' then
+        -- TODO: figure out if we can do something sensible with read receipts
     else
         perr(('Unknown chunk type %s%s%s in room %s%s%s'):format(
             w.color'bold',
@@ -2288,6 +2306,28 @@ function Room:Download_keys()
     for id, name in pairs(self.users) do
         -- TODO enable batch downloading of keys here when synapse can handle it
         SERVER.olm.query({id})
+    end
+end
+
+function Room:MarkAsRead()
+    -- Get event id from tag of last line in buffer
+    local lines = w.hdata_pointer(w.hdata_get('buffer'), self.buffer, 'own_lines')
+    if lines == '' then return end
+    local line = w.hdata_pointer(w.hdata_get('lines'), lines, 'last_line')
+    if line == '' then return end
+    local hdata_line = w.hdata_get('line')
+    local hdata_line_data = w.hdata_get('line_data')
+    local data = w.hdata_pointer(hdata_line, line, 'data')
+    local tag_count = w.hdata_integer(hdata_line_data, data, "tags_count")
+    if tag_count > 0 then
+        for i = 0, tag_count-1 do
+            local tag = w.hdata_string(hdata_line_data, data, i .. "|tags_array")
+            -- Event ids are like $142533663810152bfUKc:matrix.org
+            if tag:match'^%$.*:' then
+                SERVER:SendReadReceipt(self.identifier, tag)
+                break
+            end
+        end
     end
 end
 
@@ -2617,6 +2657,15 @@ function typing_notification_cb(signal, sig_type, data)
     return w.WEECHAT_RC_OK
 end
 
+function buffer_switch_cb(signal, sig_type, data)
+    local current_buffer = w.current_buffer()
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        room:MarkAsRead()
+    end
+    return w.WEECHAT_RC_OK
+end
+
 if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "matrix_unload", "UTF-8") then
     local settings = {
         homeserver_url= {'https://matrix.org/', 'Full URL including port to your homeserver (including trailing slash) or use default matrix.org'},
@@ -2676,4 +2725,6 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
 
     SERVER = MatrixServer.create()
     SERVER:connect()
+
+    w.hook_signal('buffer_switch', "buffer_switch_cb", "")
 end
