@@ -94,7 +94,7 @@ unofficial packages [here](https://weechat.org/download/debian/).
 
 ### using brew:
 ```bash
-brew install luarocks
+brew install lua
 brew install weechat --with-lua
 ```
 
