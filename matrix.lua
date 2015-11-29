@@ -39,6 +39,9 @@ This script maps this as follows:
  Fix broken state after failed initial connect
  Fix parsing of kick messages
  Fix parsing of multiple join messages
+ Friendlier error message on bad user/password
+ Parse some HTML and turn into color/bold/etc
+ Handle m.room.canonical_alias
 ]]
 
 local json = require 'cjson' -- apt-get install lua-cjson
