@@ -1541,6 +1541,7 @@ function Room:_nickListChanged()
     -- is a "private" one like IRC's query type
     if self.member_count == 3 then -- don't run code for every add > 2
         w.buffer_set(self.buffer, "localvar_set_type", 'channel')
+        self.buffer_type = 'channel'
     elseif self.member_count == 2 then
         -- At the point where we reach two nicks, set the buffer name to be
         -- the display name of the other guy that is not our self since it's
@@ -1548,6 +1549,7 @@ function Room:_nickListChanged()
         -- a concept
         w.buffer_set(self.buffer, "localvar_set_type", 'private')
         w.buffer_set(self.buffer, "localvar_set_server", self.server)
+        self.buffer_type = 'query'
         -- Check if the room name is identifier meaning we don't have a
         -- name set yet, and should try and set one
         local buffer_name = w.buffer_get_string(self.buffer, 'name')
@@ -1940,6 +1942,9 @@ function Room:parseChunk(chunk, backlog, chunktype)
 
         if not backlog and not is_self then
             tag'notify_message'
+            if self.buffer_type == 'query' then
+                tag'notify_private'
+            end
         end
 
         local time_int = chunk['origin_server_ts']/1000
