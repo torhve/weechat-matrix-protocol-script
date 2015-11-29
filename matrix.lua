@@ -42,6 +42,7 @@ This script maps this as follows:
  Friendlier error message on bad user/password
  Parse some HTML and turn into color/bold/etc
  Handle m.room.canonical_alias
+ Fix kick line generation, currently looks like the kicker left the room.
 ]]
 
 local json = require 'cjson' -- apt-get install lua-cjson
