@@ -1427,7 +1427,7 @@ Room.create = function(obj)
     -- Cache users for presence/nicklist
     room.users = {}
     -- Cache the rooms power levels state
-    room.power_levels = {users={}}
+    room.power_levels = {users={},users_default=0}
     -- Encryption status of room
     room.encrypted = false
     -- We might not be a member yet
@@ -1640,7 +1640,7 @@ function Room:GetNickGroup(user_id)
 end
 
 function Room:GetPowerLevel(user_id)
-    return self.power_levels.users[user_id] or 0
+    return self.power_levels.users[user_id] or self.power_levels.users_default or 0
 end
 
 function Room:ClearTyping()
