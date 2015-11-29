@@ -359,6 +359,9 @@ local function http(url, post, cb, timeout, extra, api_ns)
 end
 
 function poll_cb(data, command, rc, stdout, stderr)
+    if DEBUG then
+        dbg{reply={command=command,data=data,rc=rc,stdout=stdout,stderr=stderr}}
+    end
     -- Because of a bug in WeeChat sometimes the stdout gets prepended by
     -- any number of BEL chars (hex 07). Let's have a nasty workaround and
     -- just replace them away.
@@ -387,9 +390,6 @@ function poll_cb(data, command, rc, stdout, stderr)
             -- case of errors. This will make the polltimer kick in in 30
             -- seconds or so
             return w.WEECHAT_RC_OK
-        end
-        if DEBUG then
-            dbg{reply={command=command,js=js}}
         end
         if js['errcode'] then
             perr(js.errcode)
@@ -435,8 +435,9 @@ function poll_cb(data, command, rc, stdout, stderr)
         SERVER.polling = false
         SERVER:poll()
     end
+
     -- Empty cache in case of errors
-    if tonumber(rc) ~= 0 then
+    if tonumber(rc) == -2 then -- -2 == WEECHAT_HOOK_PROCESS_ERROR
         if STDOUT[command] then
             STDOUT[command] = nil
             SERVER.polling = false
