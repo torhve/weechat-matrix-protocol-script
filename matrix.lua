@@ -544,18 +544,7 @@ function real_http_cb(data, command, rc, stdout, stderr)
                 SERVER:UpdatePresence(chunk.content)
             end
             SERVER.end_token = js['end']
-            -- We have our backlog, lets start listening for new events
-            SERVER:poll()
-            -- Timer used in cased of errors to restart the polling cycle
-            -- During normal operation the polling should re-invoke itself
-            SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
-            if olmstatus then
-                -- timer that checks number of otks available on the server
-                SERVER.otktimer = w.hook_timer(5*60*1000, 0, 0, "otktimer_cb", "")
-                SERVER.olm.query{SERVER.user_id}
-                --SERVER.olm.upload_keys()
-                SERVER.olm.check_server_keycount()
-            end
+            SERVER:post_initial_sync()
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
@@ -993,6 +982,21 @@ function MatrixServer:initial_sync()
         limit = w.config_get_plugin('backlog_lines'),
     })
     http('/initialSync?'..data)
+end
+
+function Matrix:post_initial_sync()
+    -- We have our backlog, lets start listening for new events
+    SERVER:poll()
+    -- Timer used in cased of errors to restart the polling cycle
+    -- During normal operation the polling should re-invoke itself
+    SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
+    if olmstatus then
+        -- timer that checks number of otks available on the server
+        SERVER.otktimer = w.hook_timer(5*60*1000, 0, 0, "otktimer_cb", "")
+        SERVER.olm.query{SERVER.user_id}
+        --SERVER.olm.upload_keys()
+        SERVER.olm.check_server_keycount()
+    end
 end
 
 function MatrixServer:getMessages(room_id)
