@@ -176,6 +176,12 @@ urllib.urlencode = function(tbl)
     return table.concat(out, '&')
 end
 
+local transaction_id_counter = 0
+local function get_next_transaction_id()
+    transaction_id_counter = transaction_id_counter + 1
+    return transaction_id_counter
+end
+
 local function sign_json(json_object, signing_key, signing_name)
     -- See: https://github.com/matrix-org/matrix-doc/blob/master/specification/31_event_signing.rst
     -- Maybe use:http://regex.info/code/JSON.lua which sorts keys
@@ -362,96 +368,11 @@ local function http(url, post, cb, timeout, extra, api_ns)
     w.hook_process_hashtable('url:' .. url, post, timeout, cb, extra)
 end
 
-function poll_cb(data, command, rc, stdout, stderr)
+function real_http_cb(extra, command, rc, stdout, stderr)
     if DEBUG then
         dbg{reply={command=command,data=data,rc=rc,stdout=stdout,stderr=stderr}}
     end
-    -- Because of a bug in WeeChat sometimes the stdout gets prepended by
-    -- any number of BEL chars (hex 07). Let's have a nasty workaround and
-    -- just replace them away.
-    stdout = (stdout:gsub('^\007*', ''))
 
-    if stderr ~= '' then
-        perr(('%s'):format(stderr))
-        SERVER.polling = false
-    end
-
-    if stdout ~= '' then
-        if not STDOUT[command] then
-            STDOUT[command] = {}
-        end
-        table.insert(STDOUT[command], stdout)
-    end
-
-    if tonumber(rc) >= 0 and STDOUT[command]  then
-        stdout = table.concat(STDOUT[command])
-        STDOUT[command] = nil
-        -- Protected call in case of JSON errors
-        local success, js = pcall(json.decode, stdout)
-        if not success then
-            perr(('%s during json load: %s'):format(js, stdout))
-            -- Return here so we don't go spinning into a crazy loop in
-            -- case of errors. This will make the polltimer kick in in 30
-            -- seconds or so
-            return w.WEECHAT_RC_OK
-        end
-        if js['errcode'] then
-            perr(js.errcode)
-            perr(js['error'])
-        else
-            if js['end'] then
-                SERVER.end_token = js['end']
-            end
-            for _, chunk in ipairs(js.chunk or {}) do
-                if chunk.room_id then
-                    local room = SERVER.rooms[chunk['room_id']]
-                    if room then
-                        room:parseChunk(chunk, false, 'messages')
-                    else
-                        -- Chunk for non-existing room, maybe we just got
-                            -- invited, so lets create a room
-                        if (chunk.content and chunk.content.membership and
-                          chunk.content.membership == 'invite') -- or maybe we just created a new room ourselves
-                          or chunk['type'] == 'm.room.create'
-                          then
-                            local newroom = SERVER:addRoom(chunk)
-                            newroom:parseChunk(chunk, false, 'messages')
-                        elseif chunk.content and chunk.content.membership and
-                              chunk.content.membership == 'leave' then
-                              -- Ignore leave events
-                        elseif chunk.type and chunk.type == 'm.typing' then
-                            -- Ignore typing events for unknown rooms
-                        else
-                            -- Maybe user closed the buffer? Recreate.
-                            local newroom = SERVER:addRoom(chunk)
-                            newroom:parseChunk(chunk, false, 'messages')
-
-                            perr('Event for unknown room... Recreating buffer. Try /lua reload matrix to refresh all state')
-                        end
-                    end
-                elseif chunk.type == 'm.presence' then
-                    SERVER:UpdatePresence(chunk.content)
-                else
-                    dbg{err='unknown polling event',chunk=chunk}
-                end
-            end
-        end
-        SERVER.polling = false
-        SERVER:poll()
-    end
-
-    -- Empty cache in case of errors
-    if tonumber(rc) == -2 then -- -2 == WEECHAT_HOOK_PROCESS_ERROR
-        if STDOUT[command] then
-            STDOUT[command] = nil
-            SERVER.polling = false
-        end
-    end
-
-    return w.WEECHAT_RC_OK
-end
-
-function real_http_cb(data, command, rc, stdout, stderr)
     if stderr and stderr ~= '' then
         mprint(('error: %s'):format(stderr))
         return w.WEECHAT_RC_OK
@@ -479,9 +400,6 @@ function real_http_cb(data, command, rc, stdout, stderr)
             js = {}
             return w.WEECHAT_RC_OK
         end
-        if DEBUG then
-            dbg{reply={command=command,js=js}}
-        end
         if js['errcode'] then
             if command:find'login' then
                 w.print('', ('matrix: Error code during login: %s'):format(
@@ -507,44 +425,69 @@ function real_http_cb(data, command, rc, stdout, stderr)
             for _, chunk in ipairs(js['messages']['chunk']) do
                 myroom:parseChunk(chunk, true, 'messages')
             end
-        elseif command:find'v1/initialSync' then
+        elseif command:find'v2_alpha/sync' then
+            SERVER.end_token = js.next_batch
             -- Start with setting the global presence variable on the server
             -- so when the nicks get added to the room they can get added to
             -- the correct nicklist group according to if they have presence
             -- or not
-            for _, chunk in ipairs(js.presence) do
-                SERVER:UpdatePresence(chunk.content)
+            for _, e in ipairs(js.presence.events) do
+                SERVER.presence[e.sender] = e.content.presence
             end
-            for _, room in ipairs(js['rooms']) do
+            for membership, rooms in pairs(js['rooms']) do
                 -- If we left the room, simply ignore it
-                if room.membership ~= 'leave' then
-                    local myroom = SERVER:addRoom(room)
-
-                    -- Parse states before messages so we can add nicks and stuff
-                    -- before messages start appearing
-                    local states = room.state
-                    if states then
-                        local chunks = room.state or {}
-                        for _, chunk in ipairs(chunks) do
-                            myroom:parseChunk(chunk, true, 'states')
+                if membership ~= 'leave' then
+                    for identifier, room in pairs(rooms) do
+                        -- Monkey patch it to look like v1 object
+                        room.room_id = identifier
+                        local myroom
+                        if extra == 'initial' then
+                            myroom = SERVER:addRoom(room)
+                        else
+                            myroom = SERVER.rooms[identifier]
+                            -- Chunk for non-existing room
+                            if not myroom then
+                                local newroom = SERVER:addRoom(room)
+                                if not membership == 'invite' then
+                                    perr('Event for unknown room')
+                                    dbg{chunk=chunk}
+                                end
+                            end
                         end
-                    end
-                    local messages = room.messages
-                    if messages then
-                        local chunks = messages.chunk or {}
-                        for _, chunk in ipairs(chunks) do
-                            myroom:parseChunk(chunk, true, 'messages')
+                        -- Parse states before messages so we can add nicks and stuff
+                        -- before messages start appearing
+                        local states = room.state
+                        if states then
+                            local chunks = room.state.events or {}
+                            for _, chunk in ipairs(chunks) do
+                                myroom:parseChunk(chunk, true, 'states')
+                            end
+                        end
+                        local timeline = room.timeline
+                        if timeline then
+                            local chunks = timeline.events or {}
+                            for _, chunk in ipairs(chunks) do
+                                myroom:parseChunk(chunk, true, 'messages')
+                            end
+                        end
+                        local ephemeral = room.ephemeral
+                        -- Ignore Ephemeral Events during initial sync
+                        if extra and extra ~= 'initial' and ephemeral then
+                            local chunks = ephemeral.events or {}
+                            for _, chunk in ipairs(chunks) do
+                                myroom:parseChunk(chunk, true, 'states')
+                            end
                         end
                     end
                 end
             end
             -- Now we have created rooms and can go over the rooms and update
             -- the presence for each nick
-            for _, chunk in pairs(js.presence) do
-                SERVER:UpdatePresence(chunk.content)
-            end
-            SERVER.end_token = js['end']
+            --for _, chunk in pairs(js.presence) do
+            --    SERVER:UpdatePresence(chunk.content)
+            --end
             SERVER:post_initial_sync()
+            SERVER:poll()
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
         elseif command:find'/join/' then
@@ -664,10 +607,16 @@ function real_http_cb(data, command, rc, stdout, stderr)
                 js=js}}
         end
     end
-    if tonumber(rc) == -2 then
+
+    if tonumber(rc) == -2 then -- -2 == WEECHAT_HOOK_PROCESS_ERROR
         perr(('Call to API errored in command %s, maybe timeout?'):format(
             command))
+        -- Empty cache in case of errors
+        if STDOUT[command] then
+            STDOUT[command] = nil
+        end
     end
+
 
     return w.WEECHAT_RC_OK
 end
@@ -690,7 +639,6 @@ MatrixServer.create = function()
      setmetatable(server, MatrixServer)
      server.nick = nil
      server.connecting = false
-     server.polling = false
      server.connected = false
      server.rooms = {}
      -- Store user presences here since they are not local to the rooms
@@ -981,21 +929,29 @@ function MatrixServer:initial_sync()
         access_token = self.access_token,
         limit = w.config_get_plugin('backlog_lines'),
     })
-    http('/initialSync?'..data)
+    -- v1 http('/initialSync?'..data)
+    local data = urllib.urlencode({
+        access_token = self.access_token,
+        timeout = 1000*POLL_INTERVAL,
+        full_state = 'true'
+    })
+    local extra = 'initial'
+    http('/sync?'..data, nil, 'http_cb', (POLL_INTERVAL+10)*1000, extra, v2_api_ns)
 end
 
-function Matrix:post_initial_sync()
-    -- We have our backlog, lets start listening for new events
-    SERVER:poll()
-    -- Timer used in cased of errors to restart the polling cycle
-    -- During normal operation the polling should re-invoke itself
-    SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
-    if olmstatus then
-        -- timer that checks number of otks available on the server
-        SERVER.otktimer = w.hook_timer(5*60*1000, 0, 0, "otktimer_cb", "")
-        SERVER.olm.query{SERVER.user_id}
-        --SERVER.olm.upload_keys()
-        SERVER.olm.check_server_keycount()
+function MatrixServer:post_initial_sync()
+    if not self.postsync then
+        -- Timer used in cased of errors to restart the polling cycle
+        -- During normal operation the polling should re-invoke itself
+        SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
+        if olmstatus then
+            -- timer that checks number of otks available on the server
+            SERVER.otktimer = w.hook_timer(5*60*1000, 0, 0, "otktimer_cb", "")
+            SERVER.olm.query{SERVER.user_id}
+            --SERVER.olm.upload_keys()
+            SERVER.olm.check_server_keycount()
+        end
+        self.postsync = true
     end
 end
 
@@ -1038,26 +994,23 @@ function MatrixServer:part(room)
 end
 
 function MatrixServer:poll()
-    if self.connected == false or self.polling then
+    if self.connected == false then
         return
     end
     self.polltime = os.time()
-    self.polling = true
     local data = urllib.urlencode({
         access_token = self.access_token,
         timeout = 1000*POLL_INTERVAL,
-        from = self.end_token
+        full_state = 'false',
+        since = self.end_token
     })
-    http('/events?'..data, nil, 'poll_cb', (POLL_INTERVAL+10)*1000)
+    http('/sync?'..data, nil, 'http_cb', (POLL_INTERVAL+10)*1000, nil, v2_api_ns)
 end
 
 function MatrixServer:addRoom(room)
     local myroom = Room.create(room)
     myroom:create_buffer()
     self.rooms[room['room_id']] = myroom
-    if room.membership == 'invite' and room.inviter then
-        myroom:addNick(room.inviter)
-    end
     return myroom
 end
 
@@ -1117,10 +1070,6 @@ function MatrixServer:ClearSendTimer()
 end
 
 function send(data, calls)
-    -- Schedule a poll so that sending a message will try to poll messages
-    -- if we came back from a server error, which has a wait time becaue of
-    -- the polltimer.
-    SERVER:poll()
     SERVER:ClearSendTimer()
     -- Iterate rooms
     for id, msgs in pairs(OUT) do
@@ -1274,14 +1223,17 @@ function send(data, calls)
         end
 
         data.postfields = json.encode(data.postfields)
+        data.customrequest = 'PUT'
 
-        http(('/rooms/%s/send/'..api_event_function..'?access_token=%s')
+        http(('/rooms/%s/send/%s/%s?access_token=%s')
             :format(
               urllib.quote(id),
+              api_event_function,
+              get_next_transaction_id(),
               urllib.quote(SERVER.access_token)
             ),
-              data
-            )
+            data
+        )
     end
 end
 
@@ -1435,9 +1387,34 @@ Room.create = function(obj)
     -- Cache users for presence/nicklist
     room.users = {}
     -- Cache the rooms power levels state
-    room.power_levels = {users={},users_default=0}
+    room.power_levels = {users={}, users_default=0}
     -- Encryption status of room
     room.encrypted = false
+    room.visibility = 'public'
+    room.join_rule = nil
+
+    -- Might be invited to room, check invite state
+    local invite_state = obj.invite_state or {}
+    for _, event in ipairs(invite_state.events or {}) do
+        if event['type'] == 'm.room.name' then
+            room.name = event.content.name
+        elseif event['type'] == 'm.room.join_rule' then
+            room.join_rule = event.content.join_rule
+        elseif event['type'] == 'm.room.member' then
+            room.membership = 'invite'
+            room.inviter = event.sender
+            if w.config_get_plugin('autojoin_on_invite') == 'on' then
+                SERVER:join(room.identifier)
+            else
+                mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.name or room.identifier, obj.inviter, room.identifier))
+            end
+        else
+            if DEBUG then
+                dbg{err='Unhandled invite_state event',event=event}
+            end
+        end
+    end
+
     -- We might not be a member yet
     local state_events = obj.state or {}
     for _, state in ipairs(state_events) do
@@ -1454,18 +1431,12 @@ Room.create = function(obj)
     if not room.server then
         room.server = ''
     end
+
     room.visibility = obj.visibility
     if not obj['visibility'] then
         room.visibility = 'public'
     end
 
-    if obj.membership == 'invite' then
-        if w.config_get_plugin('autojoin_on_invite') == 'on' then
-            SERVER:join(room.identifier)
-        else
-            mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.identifier, obj.inviter, room.identifier))
-        end
-    end
 
     return room
 end
@@ -1534,6 +1505,21 @@ function Room:create_buffer()
     w.buffer_set(self.buffer, "localvar_set_server", self.server)
     w.buffer_set(self.buffer, "localvar_set_roomid", self.identifier)
     self:setName(self.name)
+    if self.membership == 'invite' then
+        self:addNick(self.inviter)
+        if w.config_get_plugin('autojoin_on_invite') ~= 'on' then
+            w.print_date_tags(
+                self.buffer,
+                nil,
+                'notify_message',
+                ('You have been invited to join room %s by %s. Type /join in this buffer to join.')
+                    :format(
+                      self.name,
+                      self.inviter,
+                      self.identifier)
+            )
+        end
+    end
 end
 
 function Room:destroy()
@@ -1929,8 +1915,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
     end
 
     local is_self = false
+    local was_decrypted = false
+
+    -- Sender of chunk, used to be chunk.user_id, v2 uses chunk.sender
+    local sender = chunk.sender or chunk.user_id
     -- Check if own message
-    if chunk.user_id == SERVER.user_id then
+    if sender == SERVER.user_id then
         is_self = true
         tag{'no_highlight','notify_none'}
     end
@@ -1938,10 +1928,15 @@ function Room:parseChunk(chunk, backlog, chunktype)
     -- like redactions and localecho, etc
     tag{chunk.event_id}
 
+    -- Some messages are missing ts
+    local origin_server_ts = chunk['origin_server_ts'] or 0
+    local time_int = origin_server_ts/1000
+
     if chunk['type'] == 'm.room.message' or chunk['type'] == 'm.room.encrypted' then
         if chunk['type'] == 'm.room.encrypted'  then
             tag{'no_log'} -- Don't log encrypted message
             chunk = self:decryptChunk(chunk)
+            was_decrypted = true
         end
 
         if not backlog and not is_self then
@@ -1951,7 +1946,6 @@ function Room:parseChunk(chunk, backlog, chunktype)
             end
         end
 
-        local time_int = chunk['origin_server_ts']/1000
         local color = default_color
         local body
         local content = chunk['content']
@@ -1960,6 +1954,9 @@ function Room:parseChunk(chunk, backlog, chunktype)
             -- We don't support redactions
             return
         end
+
+        -- If it has transaction id, it is from this client.
+        local is_from_this_client = chunk.unsigned.transaction_id
 
         if content['msgtype'] == 'm.text' then
             body = content['body']
@@ -1977,7 +1974,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             body = content['body']
         elseif content['msgtype'] == 'm.emote' then
             local nick_c
-            local nick = self.users[chunk.user_id] or chunk.user_id
+            local nick = self.users[sender] or sender
             if is_self then
                 nick_c = w.color('chat_nick_self')
             else
@@ -1991,10 +1988,9 @@ function Room:parseChunk(chunk, backlog, chunktype)
             )
             local prefix = prefix_c .. prefix
             local data = ("%s\t%s"):format(prefix, body)
-            if not backlog and is_self
-                -- TODO better check, to work for multiple weechat clients
+            if not backlog and is_self and is_from_this_client
               and w.config_get_plugin('local_echo') == 'on'
-              and not olmstatus -- disable local echo for encryption
+              and not was_decrypted -- disable local echo for encryption
               then
                 -- We have already locally echoed this line
                 return
@@ -2018,13 +2014,13 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
         if not backlog and is_self
           -- TODO better check, to work for multiple weechat clients
-          and w.config_get_plugin('local_echo') == 'on'
-          and not olmstatus then -- disable local echo for encrypted messages
+          and (w.config_get_plugin('local_echo') == 'on' and is_from_this_client)
+          and not was_decrypted then -- disable local echo for encrypted messages
             -- We have already locally echoed this line
             return
         end
         local data = ("%s\t%s%s"):format(
-                self:formatNick(chunk.user_id),
+                self:formatNick(sender),
                 color,
                 body)
         w.print_date_tags(self.buffer, time_int, tags(), data)
@@ -2035,7 +2031,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
         w.buffer_set(self.buffer, "title", title)
         local color = wcolor("irc.color.topic_new")
-        local nick = self.users[chunk.user_id] or chunk.user_id
+        local nick = self.users[sender] or sender
         local data = ('--\t%s%s has changed the topic to "%s%s%s"'):format(
                 nick,
                 default_color,
@@ -2055,12 +2051,11 @@ function Room:parseChunk(chunk, backlog, chunktype)
         if chunk['content']['membership'] == 'join' then
             tag"irc_join"
             --- FIXME shouldn't be neccessary adding all the time
-            local nick = self.users[chunk.user_id] or self:addNick(chunk.user_id, chunk.content.displayname)
+            local nick = self.users[sender] or self:addNick(sender, chunk.content.displayname)
             local name = chunk.content.displayname
             if not name or name == json.null or name == '' then
-                name = chunk.user_id
+                name = sender
             end
-            local time_int = chunk['origin_server_ts']/1000
             -- Check if the chunk has prev_content or not
             -- if there is prev_content there wasn't a join but a nick change
             if chunk.prev_content
@@ -2068,15 +2063,15 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     and chunktype == 'messages' then
                 local oldnick = chunk.prev_content.displayname
                 if not oldnick or oldnick == json.null then
-                    oldnick = chunk.user_id
+                    oldnick = sender
                 else
                     if oldnick == name then
                         -- Maybe they changed their avatar or something else
                         -- that we don't care about (or multiple joins)
                         return
                     end
-                    self:delNick(chunk.user_id)
-                    nick = self:addNick(chunk.user_id, chunk.content.displayname)
+                    self:delNick(sender)
+                    nick = self:addNick(sender, chunk.content.displayname)
                 end
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
                 local data = ('%s--\t%s%s%s is now known as %s%s'):format(
@@ -2095,21 +2090,21 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     name,
                     wcolor('irc.color.message_join'),
                     wcolor'weechat.color.chat_host',
-                    chunk.user_id,
+                    sender,
                     wcolor('irc.color.message_join')
                 )
                 w.print_date_tags(self.buffer, time_int, tags(), data)
                 -- if this is an encrypted room, also download key
                 if olmstatus and self.encrypted then
-                    SERVER.olm.query{chunk.user_id}
+                    SERVER.olm.query{sender}
                 end
             end
         elseif chunk['content']['membership'] == 'leave' then
             if chunktype == 'states' then
-                self:delNick(chunk.user_id)
+                self:delNick(chunk.state_key)
             end
             if chunktype == 'messages' then
-                local nick = chunk.user_id
+                local nick = sender
                 local prev = chunk['prev_content']
                 if (prev and
                         prev.displayname and
@@ -2117,7 +2112,6 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     nick = prev.displayname
                 end
                 tag"irc_quit"
-                local time_int = chunk['origin_server_ts']/1000
                 local data = ('%s%s\t%s%s%s left the room.'):format(
                     wcolor('weechat.color.chat_prefix_quit'),
                     wconf('weechat.look.prefix_quit'),
@@ -2133,26 +2127,25 @@ function Room:parseChunk(chunk, backlog, chunktype)
                   (not backlog and chunktype=='messages') then
                 if w.config_get_plugin('autojoin_on_invite') == 'on' then
                     SERVER:join(self.identifier)
-                    self:addNick(chunk.user_id)
+                    self:addNick(sender)
                     mprint(('%s invited you'):format(
-                        chunk.user_id))
+                        sender))
                 else
                     mprint(('You have been invited to join room %s by %s. Type /join %s to join.')
                         :format(
-                          self.identifier,
-                          chunk.user_id,
+                          self.name,
+                          sender,
                           self.identifier))
                 end
             end
             if chunktype == 'messages' then
                 tag"irc_invite"
-                local time_int = chunk['origin_server_ts']/1000
                 local prefix_c = wcolor'weechat.color.chat_prefix_action'
                 local prefix = wconf'weechat.look.prefix_action'
                 local data = ("%s%s\t%s invited %s to join"):format(
                     prefix_c,
                     prefix,
-                    self.users[chunk.user_id] or chunk.user_id,
+                    self.users[sender] or sender,
                     self.users[chunk.state_key] or chunk.state_key
                 )
                 w.print_date_tags(self.buffer, time_int, tags(), data)
@@ -2160,13 +2153,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
         elseif chunk['content']['membership'] == 'ban' then
             if chunktype == 'messages' then
                 tag"irc_ban"
-                local time_int = chunk['origin_server_ts']/1000
                 local prefix_c = wcolor'weechat.color.chat_prefix_action'
                 local prefix = wconf'weechat.look.prefix_action'
                 local data = ("%s%s\t%s banned %s"):format(
                     prefix_c,
                     prefix,
-                    self.users[chunk.user_id] or chunk.user_id,
+                    self.users[sender] or sender,
                     self.users[chunk.state_key] or chunk.state_key
                 )
                 w.print_date_tags(self.buffer, time_int, tags(), data)
@@ -2375,7 +2367,12 @@ function join_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if current_buffer == BUFFER or room then
         local _, args = split_args(args)
-        SERVER:join(args)
+        if not args then
+            -- To support running /join on a invited room without args
+            SERVER:join(room.identifier)
+        else
+            SERVER:join(args)
+        end
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
