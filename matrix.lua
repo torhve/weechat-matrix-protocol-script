@@ -929,7 +929,6 @@ function MatrixServer:initial_sync()
         access_token = self.access_token,
         limit = w.config_get_plugin('backlog_lines'),
     })
-    -- v1 http('/initialSync?'..data)
     local data = urllib.urlencode({
         access_token = self.access_token,
         timeout = 1000*POLL_INTERVAL,
@@ -1392,12 +1391,16 @@ Room.create = function(obj)
     room.encrypted = false
     room.visibility = 'public'
     room.join_rule = nil
+    room.roomname = nil -- m.room.name
+    room.aliases = nil -- aliases
+    room.canonical_alias = nil
 
     -- Might be invited to room, check invite state
     local invite_state = obj.invite_state or {}
     for _, event in ipairs(invite_state.events or {}) do
         if event['type'] == 'm.room.name' then
             room.name = event.content.name
+            room.roomname = event.content.name
         elseif event['type'] == 'm.room.join_rule' then
             room.join_rule = event.content.join_rule
         elseif event['type'] == 'm.room.member' then
@@ -1445,6 +1448,16 @@ function Room:setName(name)
     if not name or name == '' or name == json.null then
         return
     end
+    -- override hierarchy
+    if self.canonical_alias then name = self.canonical_alias end
+    if self.roomname then name = self.roomname end
+
+    -- Check for dupe
+    local buffer_name = w.buffer_get_string(self.buffer, 'name')
+    if buffer_name == name then
+        return
+    end
+
     w.buffer_set(self.buffer, "short_name", name)
     w.buffer_set(self.buffer, "name", name)
     -- Doesn't work
@@ -2058,10 +2071,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
             end
             -- Check if the chunk has prev_content or not
             -- if there is prev_content there wasn't a join but a nick change
-            if chunk.prev_content
-                    and chunk.prev_content.membership == 'join'
+            -- or duplicate join
+            local prev_content = chunk.unsigned.prev_content
+            if prev_content
+                    and prev_content.membership == 'join'
                     and chunktype == 'messages' then
-                local oldnick = chunk.prev_content.displayname
+                local oldnick = prev_content.displayname
                 if not oldnick or oldnick == json.null then
                     oldnick = sender
                 else
@@ -2105,7 +2120,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             end
             if chunktype == 'messages' then
                 local nick = sender
-                local prev = chunk['prev_content']
+                local prev = chunk.unsigned.prev_content
                 if (prev and
                         prev.displayname and
                         prev.displayname ~= json.null) then
@@ -2193,6 +2208,9 @@ function Room:parseChunk(chunk, backlog, chunktype)
         -- Use first alias, weechat doesn't really support multiple  aliases
         self.aliases = chunk.content.aliases
         self:setName(chunk.content.aliases[1])
+    elseif chunk['type'] == 'm.room.canonical_alias' then
+        self.canonical_alias = chunk.content.alias
+        self:setName(self.canonical_alias)
     elseif chunk['type'] == 'm.room.redaction' then
         local redact_id = chunk.redacts
         perr('Redacting message ' .. redact_id)
