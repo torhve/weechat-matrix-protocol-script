@@ -432,6 +432,11 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             -- poll lock
             SERVER.poll_lock = false
 
+            local backlog = false
+            if extra == 'initial' then
+                backlog = true
+            end
+
             -- Start with setting the global presence variable on the server
             -- so when the nicks get added to the room they can get added to
             -- the correct nicklist group according to if they have presence
@@ -465,14 +470,14 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         if states then
                             local chunks = room.state.events or {}
                             for _, chunk in ipairs(chunks) do
-                                myroom:parseChunk(chunk, true, 'states')
+                                myroom:parseChunk(chunk, backlog, 'states')
                             end
                         end
                         local timeline = room.timeline
                         if timeline then
                             local chunks = timeline.events or {}
                             for _, chunk in ipairs(chunks) do
-                                myroom:parseChunk(chunk, true, 'messages')
+                                myroom:parseChunk(chunk, backlog, 'messages')
                             end
                         end
                         local ephemeral = room.ephemeral
@@ -480,7 +485,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         if extra and extra ~= 'initial' and ephemeral then
                             local chunks = ephemeral.events or {}
                             for _, chunk in ipairs(chunks) do
-                                myroom:parseChunk(chunk, true, 'states')
+                                myroom:parseChunk(chunk, backlog, 'states')
                             end
                         end
                     end
@@ -1113,34 +1118,40 @@ function send(data, calls)
         -- Run IRC modifiers (XXX: maybe run out1 also?
         body = w.hook_modifier_exec('irc_out1_PRIVMSG', '', body)
 
-        if w.config_get_plugin('local_echo') == 'on'
-                and not olmstatus then -- don't use local_echo when encrypting
+        -- Find the room
+        local room
+        for _, r in pairs(SERVER.rooms) do
+            if r.identifier == id then
+                room = r
+                break
+            end
+        end
+
+        if w.config_get_plugin('local_echo') == 'on' then
             -- Generate local echo
-            for _, r in pairs(SERVER.rooms) do
-                if r.identifier == id then
-                    if msgtype == 'm.text' then
-                        w.print_date_tags(r.buffer, nil,
-                            'notify_none,localecho,no_highlight', ("%s\t%s%s"):format(
-                                r:formatNick(SERVER.user_id),
-                                default_color,
-                                body
-                                )
-                            )
-                    elseif msgtype == 'm.emote' then
-                        local prefix_c = wcolor'weechat.color.chat_prefix_action'
-                        local prefix = wconf'weechat.look.prefix_action'
-                        w.print_date_tags(r.buffer, nil,
-                            'notify_none,localecho,irc_action,no_highlight', ("%s%s\t%s%s%s %s"):format(
-                                prefix_c,
-                                prefix,
-                                w.color('chat_nick_self'),
-                                r.users[SERVER.user_id],
-                                default_color,
-                                body
-                                )
-                            )
-                    end
-                end
+            if msgtype == 'm.text' then
+                --- XXX: add no_log for encrypted?
+                --- XXX: no localecho for encrypted messages?
+                w.print_date_tags(room.buffer, nil,
+                    'notify_none,localecho,no_highlight', ("%s\t%s%s"):format(
+                        room:formatNick(SERVER.user_id),
+                        default_color,
+                        body
+                        )
+                    )
+            elseif msgtype == 'm.emote' then
+                local prefix_c = wcolor'weechat.color.chat_prefix_action'
+                local prefix = wconf'weechat.look.prefix_action'
+                w.print_date_tags(room.buffer, nil,
+                    'notify_none,localecho,irc_action,no_highlight', ("%s%s\t%s%s%s %s"):format(
+                        prefix_c,
+                        prefix,
+                        w.color('chat_nick_self'),
+                        room.users[SERVER.user_id],
+                        default_color,
+                        body
+                        )
+                    )
             end
         end
 
@@ -1159,14 +1170,6 @@ function send(data, calls)
 
         local api_event_function = 'm.room.message'
 
-        -- Find the room
-        local room
-        for _, r in pairs(SERVER.rooms) do
-            if r.identifier == id then
-                room = r
-                break
-            end
-        end
         if olmstatus and room.encrypted then
             api_event_function = 'm.room.encrypted'
             local olmd = SERVER.olm
