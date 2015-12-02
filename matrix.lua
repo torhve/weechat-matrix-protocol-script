@@ -427,6 +427,11 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             end
         elseif command:find'v2_alpha/sync' then
             SERVER.end_token = js.next_batch
+
+            -- We have a new end token, which means we safely can release the
+            -- poll lock
+            SERVER.poll_lock = false
+
             -- Start with setting the global presence variable on the server
             -- so when the nicks get added to the room they can get added to
             -- the correct nicklist group according to if they have presence
@@ -486,7 +491,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             --for _, chunk in pairs(js.presence) do
             --    SERVER:UpdatePresence(chunk.content)
             --end
-            SERVER:post_initial_sync()
+            if extra == 'initial' then
+                SERVER:post_initial_sync()
+            end
             SERVER:poll()
         elseif command:find'messages' then
             dbg('command msgs returned, '.. command)
@@ -615,11 +622,13 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         if STDOUT[command] then
             STDOUT[command] = nil
         end
+        -- Release poll lock in case of errors
+        SERVER.poll_lock = false
     end
-
 
     return w.WEECHAT_RC_OK
 end
+
 function http_cb(data, command, rc, stdout, stderr)
     if not DEBUG then
         return real_http_cb(data, command, rc, stdout, stderr)
@@ -646,6 +655,10 @@ MatrixServer.create = function()
      server.end_token = 'END'
      server.typing_time = os.time()
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
+
+     -- Use a lock to prevent multiple simul poll with same end token, which
+     -- could lead to duplicate messages
+     server.poll_lock = false
 
      if olmstatus then -- check if encryption is available
          local account = olm.Account.new()
@@ -935,22 +948,22 @@ function MatrixServer:initial_sync()
         full_state = 'true'
     })
     local extra = 'initial'
-    http('/sync?'..data, nil, 'http_cb', (POLL_INTERVAL+10)*1000, extra, v2_api_ns)
+    -- New v2 sync API is slow. Until we can easily ignore archived rooms
+    -- let's increase the timer for the initial login
+    local login_timer = 60*5*1000
+    http('/sync?'..data, nil, 'http_cb', login_timer, extra, v2_api_ns)
 end
 
 function MatrixServer:post_initial_sync()
-    if not self.postsync then
-        -- Timer used in cased of errors to restart the polling cycle
-        -- During normal operation the polling should re-invoke itself
-        SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
-        if olmstatus then
-            -- timer that checks number of otks available on the server
-            SERVER.otktimer = w.hook_timer(5*60*1000, 0, 0, "otktimer_cb", "")
-            SERVER.olm.query{SERVER.user_id}
-            --SERVER.olm.upload_keys()
-            SERVER.olm.check_server_keycount()
-        end
-        self.postsync = true
+    -- Timer used in cased of errors to restart the polling cycle
+    -- During normal operation the polling should re-invoke itself
+    SERVER.polltimer = w.hook_timer(POLL_INTERVAL*1000, 0, 0, "polltimer_cb", "")
+    if olmstatus then
+        -- timer that checks number of otks available on the server
+        SERVER.otktimer = w.hook_timer(5*60*1000, 0, 0, "otktimer_cb", "")
+        SERVER.olm.query{SERVER.user_id}
+        --SERVER.olm.upload_keys()
+        SERVER.olm.check_server_keycount()
     end
 end
 
@@ -996,6 +1009,10 @@ function MatrixServer:poll()
     if self.connected == false then
         return
     end
+    if self.poll_lock then
+        return
+    end
+    self.poll_lock = true
     self.polltime = os.time()
     local data = urllib.urlencode({
         access_token = self.access_token,
@@ -2363,7 +2380,8 @@ end
 function polltimer_cb(a,b)
     local now = os.time()
     if (now - SERVER.polltime) > POLL_INTERVAL+10 then
-        SERVER.polling = false
+        -- Release the poll lock
+        SERVER.poll_lock = false
         SERVER:poll()
     end
     return w.WEECHAT_RC_OK
