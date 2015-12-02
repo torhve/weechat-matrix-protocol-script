@@ -1029,6 +1029,10 @@ function MatrixServer:poll()
 end
 
 function MatrixServer:addRoom(room)
+    -- Just in case, we check for duplicates here
+    if self.rooms[room['room_id']] then
+        return self.rooms[room['room_id']]
+    end
     local myroom = Room.create(room)
     myroom:create_buffer()
     self.rooms[room['room_id']] = myroom
