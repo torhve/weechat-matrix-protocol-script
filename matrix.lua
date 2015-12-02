@@ -1928,7 +1928,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
     local tag = function(tag)
         -- Helper function to add tags
         if type(tag) == 'table' then
-            for _, t in pairs(tag) do
+            for _, t in ipairs(tag) do
                 taglist[t] = true
             end
         else
@@ -2122,6 +2122,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     name)
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             elseif chunktype == 'messages' then
+                tag"irc_smart_filter"
                 local data = ('%s%s\t%s%s%s (%s%s%s) joined the room.'):format(
                     wcolor('weechat.color.chat_prefix_join'),
                     wconf('weechat.look.prefix_join'),
@@ -2150,7 +2151,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                         prev.displayname ~= json.null) then
                     nick = prev.displayname
                 end
-                tag"irc_quit"
+                tag{"irc_quit","irc_smart_filter"}
                 local data = ('%s%s\t%s%s%s left the room.'):format(
                     wcolor('weechat.color.chat_prefix_quit'),
                     wconf('weechat.look.prefix_quit'),
