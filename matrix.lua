@@ -442,7 +442,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             -- the correct nicklist group according to if they have presence
             -- or not
             for _, e in ipairs(js.presence.events) do
-                SERVER.presence[e.sender] = e.content.presence
+                SERVER:UpdatePresence(e)
             end
             for membership, rooms in pairs(js['rooms']) do
                 -- If we left the room, simply ignore it
@@ -897,9 +897,9 @@ MatrixServer.create = function()
 end
 
 function MatrixServer:UpdatePresence(c)
-    self.presence[c.user_id] = c.presence
+    self.presence[c.sender] = c.content.presence
     for id, room in pairs(self.rooms) do
-        room:UpdatePresence(c.user_id, c.presence)
+        room:UpdatePresence(c.sender, c.content.presence)
     end
 end
 
