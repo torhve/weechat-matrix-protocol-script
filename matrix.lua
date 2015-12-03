@@ -2725,8 +2725,9 @@ function typing_notification_cb(signal, sig_type, data)
     -- Is this signal coming from a matrix buffer?
     local room = SERVER:findRoom(data)
     if room then
-        -- Start sending when it reaches > 4
-        if #w.buffer_get_string(data, "input") > 4 then
+        local input = w.buffer_get_string(data, "input")
+        -- Start sending when it reaches > 4 and doesn't start with command
+        if #input > 4 and not input:match'^/' then
             local now = os.time()
             -- Generate typing events every 4th second
             if SERVER.typing_time + 4 < now then
