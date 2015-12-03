@@ -2192,9 +2192,9 @@ function Room:parseChunk(chunk, backlog, chunktype)
             -- Check if we were the one being invited
             if chunk.state_key == SERVER.user_id and
                   (not backlog and chunktype=='messages') then
+                self:addNick(sender)
                 if w.config_get_plugin('autojoin_on_invite') == 'on' then
                     SERVER:join(self.identifier)
-                    self:addNick(sender)
                     mprint(('%s invited you'):format(
                         sender))
                 else
