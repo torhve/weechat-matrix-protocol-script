@@ -1109,7 +1109,7 @@ function MatrixServer:Msg(room_id, body, msgtype)
 end
 
 function MatrixServer:StartSendTimer()
-    local send_delay = 200
+    local send_delay = 50 -- Wait this long for paste detection
     self.sendtimer = w.hook_timer(send_delay, 0, 1, "send", "")
 end
 
