@@ -463,7 +463,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                             myroom = SERVER.rooms[identifier]
                             -- Chunk for non-existing room
                             if not myroom then
-                                local newroom = SERVER:addRoom(room)
+                                myroom = SERVER:addRoom(room)
                                 if not membership == 'invite' then
                                     perr('Event for unknown room')
                                     dbg{chunk=chunk}
