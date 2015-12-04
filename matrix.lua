@@ -1158,28 +1158,42 @@ function send(data, calls)
             end
         end
 
-        if w.config_get_plugin('local_echo') == 'on' then
+        if w.config_get_plugin('local_echo') == 'on' or
+            room.encrypted then
             -- Generate local echo
+            local color = default_color
             if msgtype == 'm.text' then
                 --- XXX: add no_log for encrypted?
                 --- XXX: no localecho for encrypted messages?
+                local tags = 'notify_none,localecho,no_highlight'
+                if room.encrypted then
+                    tags = tags .. ',no_log'
+                    color = w.color(w.config_get_plugin(
+                        'encrypted_message_color'))
+                end
                 w.print_date_tags(room.buffer, nil,
-                    'notify_none,localecho,no_highlight', ("%s\t%s%s"):format(
+                    tags, ("%s\t%s%s"):format(
                         room:formatNick(SERVER.user_id),
-                        default_color,
+                        color,
                         body
                         )
                     )
             elseif msgtype == 'm.emote' then
                 local prefix_c = wcolor'weechat.color.chat_prefix_action'
                 local prefix = wconf'weechat.look.prefix_action'
+                local tags = 'notify_none,localecho,irc_action,no_highlight'
+                if room.encrypted then
+                    tags = tags .. ',no_log'
+                    color = w.color(w.config_get_plugin(
+                        'encrypted_message_color'))
+                end
                 w.print_date_tags(room.buffer, nil,
-                    'notify_none,localecho,irc_action,no_highlight', ("%s%s\t%s%s%s %s"):format(
+                    tags, ("%s%s\t%s%s%s %s"):format(
                         prefix_c,
                         prefix,
                         w.color('chat_nick_self'),
                         room.users[SERVER.user_id],
-                        default_color,
+                        color,
                         body
                         )
                     )
@@ -1887,20 +1901,30 @@ function Room:decryptChunk(chunk)
     local found_session = false
     local sessions = SERVER.olm:get_sessions(device_key)
     for id, pickle in pairs(sessions) do
+        -- Check if we already successfully decrypted with a sesssion, if that
+        -- is the case we break the loop
+        if decrypted then
+            break
+        end
         session = olm.Session.new()
         session:unpickle(OLM_KEY, pickle)
         local matches_inbound = session:matches_inbound(ciphertext.body)
-        perr(('%s : |%s| : inbound match'):format(session:session_id(), matches_inbound))
-        if ciphertext.type == 0 and matches_inbound then
+        ---if ciphertext.type == 0 and matches_inbound then
+        if matches_inbound then
             found_session = true
         end
-        decrypted, err = session:decrypt(ciphertext.type, ciphertext.body)
+        local cleartext, err = session:decrypt(ciphertext.type, ciphertext.body)
         if not err then
-            perr(('Able to decrypt with an existing session!'))
+            if DEBUG then
+                perr(('olm: Able to decrypt with an existing session %s'):format(session:session_id()))
+            end
+            decrypted = cleartext
             SERVER.olm:store_session(device_key, session)
         else
             chunk.content.body = "Decryption error: "..err
-            perr(('Unable to decrypt with an existing session: ' .. err))
+            if DEBUG then
+                perr(('olm: Unable to decrypt with an existing session: %s. Session-ID: %s'):format(err, session:session_id()))
+            end
         end
         session:clear()
     end
@@ -2052,9 +2076,10 @@ function Room:parseChunk(chunk, backlog, chunktype)
             )
             local prefix = prefix_c .. prefix
             local data = ("%s\t%s"):format(prefix, body)
-            if not backlog and is_self and is_from_this_client
-              and w.config_get_plugin('local_echo') == 'on'
-              and not was_decrypted -- disable local echo for encryption
+            if not backlog and is_self and is_from_this_client and
+              (   w.config_get_plugin('local_echo') == 'on'
+                  or was_decrypted -- local echo for encryption
+              )
               then
                 -- We have already locally echoed this line
                 return
@@ -2076,10 +2101,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 event=content
             }
         end
-        if not backlog and is_self
+        if not backlog and is_self and is_from_this_client
           -- TODO better check, to work for multiple weechat clients
-          and (w.config_get_plugin('local_echo') == 'on' and is_from_this_client)
-          and not was_decrypted then -- disable local echo for encrypted messages
+          and (
+              w.config_get_plugin('local_echo') == 'on'
+              or was_decrypted -- local echo for encrypted messages
+            ) then
             -- We have already locally echoed this line
             return
         end
@@ -2275,7 +2302,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
     elseif chunk['type'] == 'm.receipt' then
         -- TODO: figure out if we can do something sensible with read receipts
     else
-        perr(('Unknown chunk type %s%s%s in room %s%s%s'):format(
+        perr(('Unknown event type %s%s%s in room %s%s%s'):format(
             w.color'bold',
             chunk.type,
             default_color,
