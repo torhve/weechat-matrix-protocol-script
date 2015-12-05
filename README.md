@@ -92,9 +92,10 @@ unofficial packages [here](https://weechat.org/download/debian/).
 
 ## How to get WeeChat & Lua deps up and running on OSX:
 
-### using brew:
+### using brew (recommended; it's a simpler faster install and ships newer weechat than MacPorts):
 ```bash
 brew install lua
+luarocks install lua-cjson
 brew install weechat --with-lua
 ```
 
@@ -103,8 +104,9 @@ brew install weechat --with-lua
 sudo port install weechat +lua
 sudo port install luarocks
 sudo luarocks install lua-cjson
-export LUA_PATH="/opt/local/share/luarocks/share/lua/5.2/?.lua;/opt/local/share/luarocks/share/lua/5.2/?/init.lua;$LUA_PATH"
-export LUA_CPATH="/opt/local/share/luarocks/lib/lua/5.2/?.so;$LUA_CPATH"
+# You may need to substitute the version number for whatever version of lua macports installed
+export LUA_PATH="/opt/local/share/luarocks/share/lua/5.3/?.lua;/opt/local/share/luarocks/share/lua/5.3/?/init.lua;$LUA_PATH"
+export LUA_CPATH="/opt/local/share/luarocks/lib/lua/5.3/?.so;$LUA_CPATH"
 ```
 
 # Encryption
