@@ -42,6 +42,8 @@ This script maps this as follows:
  Parse some HTML and turn into color/bold/etc
  Handle m.room.canonical_alias
  Fix kick line generation, currently looks like the kicker left the room.
+ Support weechat.look.prefix_same_nick
+ Support creating of aliases
 ]]
 
 local json = require 'cjson' -- apt-get install lua-cjson

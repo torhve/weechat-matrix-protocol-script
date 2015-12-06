@@ -24,19 +24,29 @@ Matrix is a new open source realtime federated chat protocol. You can read more 
 ## How to load and use the plugin
 
 ```bash
-# Clone my repo
+# Clone this repo
 git clone https://github.com/torhve/weechat-matrix-protocol-script.git
-# Copy the script into WeeChat's Lua autoload dir
-cp weechat-matrix-protocol-script/matrix.lua ~/.weechat/lua/autoload
+# Copy the script into WeeChat's Lua dir
+cp weechat-matrix-protocol-script/matrix.lua ~/.weechat/lua
+# Make a symlink into the autoload dir to load script automatically when WeeChat starts
+ln -s ~/.weechat/lua/matrix.lua ~/.weechat/lua/autoload
 # Start WeeChat
 weechat
 ```
-
+Helpful commands after starting WeeChat
 ```
+# If you didn't put matrix.lua in autoload
 /lua load matrix.lua
+# Set the two required settings. Look in WeeChat docs for secdata if you don't want to store passord in the clear. ( http://dev.weechat.org/post/2013/08/04/Secured-data )
 /set plugins.var.lua.matrix.user username
 /set plugins.var.lua.matrix.password secret
 /matrix connect
+
+# to display all the possible WeeChat Matrix settings:
+/set plugins.var.lua.matrix.*
+# to get a description for each option
+/help plugins.var.lua.matrix.local_echo
+
 ```
 
 When it connects it will create a WeeChat buffer called matrix that will act
