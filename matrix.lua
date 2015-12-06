@@ -29,7 +29,6 @@ This script maps this as follows:
  TODO
  ----
  /ban
- /names
  /upload
  Giving people arbitrary power levels
  Lazyload messages instead of HUGE initialSync
@@ -1565,13 +1564,22 @@ function Room:create_buffer()
     self.buffer = w.buffer_new(("%s.%s")
         :format(self.server, self.name), "buffer_input_cb",
         self.name, "closed_matrix_room_cb", "")
+    -- Needs to correspond with return values from Room:GetNickGroup()
+    -- We will use 5 nick groups:
+    -- 1: Ops
+    -- 2: Half-ops
+    -- 3: Voice
+    -- 4: People with presence
+    -- 5: People without presence
     self.nicklist_groups = {
         -- Emulate OPs
         w.nicklist_add_group(self.buffer,
             '', "000|o", "weechat.color.nicklist_group", 1),
+        w.nicklist_add_group(self.buffer,
+            '', "001|h", "weechat.color.nicklist_group", 1),
         -- Emulate half-op
         w.nicklist_add_group(self.buffer,
-            '', "001|v", "weechat.color.nicklist_group", 1),
+            '', "002|v", "weechat.color.nicklist_group", 1),
         -- Defined in weechat's irc-nick.h
         w.nicklist_add_group(self.buffer,
             '', "998|...", "weechat.color.nicklist_group", 1),
@@ -1579,6 +1587,7 @@ function Room:create_buffer()
             '', "999|...", "weechat.color.nicklist_group", 1),
     }
     w.buffer_set(self.buffer, "nicklist", "1")
+    -- Set to 1 for easier debugging of nick groups
     w.buffer_set(self.buffer, "nicklist_display_groups", "0")
     w.buffer_set(self.buffer, "localvar_set_server", self.server)
     w.buffer_set(self.buffer, "localvar_set_roomid", self.identifier)
@@ -1687,7 +1696,7 @@ end
 
 function Room:GetNickGroup(user_id)
     -- TODO, cache
-    local ngroup = 4
+    local ngroup = 5
     local nprefix = ' '
     local nprefix_color = ''
     if self:GetPowerLevel(user_id) >= 100 then
@@ -1703,12 +1712,12 @@ function Room:GetNickGroup(user_id)
         nprefix = '@'
         nprefix_color = 'lightgreen'
     elseif self:GetPowerLevel(user_id) > 0 then
-        ngroup = 2
+        ngroup = 3
         nprefix = '+'
         nprefix_color = 'yellow'
     elseif SERVER.presence[user_id] then
         -- User has a presence, put him in group3
-        ngroup = 3
+        ngroup = 4
     end
     return ngroup, nprefix, nprefix_color
 end
@@ -2727,6 +2736,69 @@ function public_command_cb(data, current_buffer, args)
     end
 end
 
+function names_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local nrcolor = function(nr)
+            return wcolor'weechat.color.chat_channel'
+                .. tostring(nr)
+                .. default_color
+        end
+        local buffer_name = nrcolor(w.buffer_get_string(room.buffer, 'name'))
+        local delim_c = wcolor'weechat.color.chat_delimiters'
+        local tags = 'no_highlight,no_log,irc_names'
+        local pcolor = wcolor'weechat.color.chat_prefix_network'
+        local ngroups = {}
+        local nicks = {}
+        for id, name in pairs(room.users) do
+            local ncolor
+            if user_id == SERVER.user_id then
+                ncolor = w.color('chat_nick_self')
+            else
+                ncolor = w.info_get('irc_nick_color', name)
+            end
+            local ngroup, nprefix, nprefix_color = room:GetNickGroup(id)
+            if nprefix == ' ' then nprefix = '' end
+            nicks[#nicks+1] = ('%s%s%s%s'):format(
+                w.color(nprefix_color),
+                nprefix,
+                ncolor,
+                name
+            )
+            if not ngroups[ngroup] then
+                ngroups[ngroup] = 0
+            end
+            ngroups[ngroup] = ngroups[ngroup] + 1
+        end
+        local data = ('%s--\tNicks %s: %s[%s%s]'):format(
+            pcolor,
+            buffer_name,
+            delim_c,
+            table.concat(nicks, ' '),
+            delim_c
+        )
+        w.print_date_tags(room.buffer, 0, tags, data)
+        local data = (
+            '%s--\tChannel %s: %s nicks %s(%s%s ops, %s voice, %s normals%s)'
+            ):format(
+                pcolor,
+                buffer_name,
+                nrcolor(room.member_count),
+                delim_c,
+                default_color,
+                nrcolor((ngroups[1] or 0) + (ngroups[2] or 0)),
+                nrcolor(ngroups[3] or 0),
+                nrcolor((ngroups[4] or 0) + (ngroups[5] or 0)),
+                delim_c
+            )
+        w.print_date_tags(room.buffer, 0, tags, data)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        perr('Could not find room')
+        return w.WEECHAT_RC_OK
+    end
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -2806,7 +2878,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
         'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'invite', 'nick',
-        'whois', 'notice', 'msg', 'encrypt', 'public'
+        'whois', 'notice', 'msg', 'encrypt', 'public', 'names'
     }
     for _, c in pairs(commands) do
         w.hook_command_run('/'..c, c..'_command_cb', '')
