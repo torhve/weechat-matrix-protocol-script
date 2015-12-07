@@ -43,7 +43,6 @@ This script maps this as follows:
  Handle m.room.canonical_alias
  Fix kick line generation, currently looks like the kicker left the room.
  Support weechat.look.prefix_same_nick
- Support creating of aliases
 ]]
 
 local json = require 'cjson' -- apt-get install lua-cjson
@@ -531,8 +530,8 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                     urllib.quote(js.room_id), data))
             end
         elseif command:find'leave' then
-            -- We store room_id in data
-            local room_id = data
+            -- We store room_id in extra
+            local room_id = extra
             SERVER:delRoom(room_id)
         elseif command:find'/keys/claim' then
             local count = 0
@@ -581,8 +580,8 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                 SERVER.olm:upload_keys()
             end
         elseif command:find'upload' then
-            -- We store room_id in data
-            local room_id = data
+            -- We store room_id in extra
+            local room_id = extra
             if js.content_uri then
                 SERVER:Msg(room_id, js.content_uri)
             end
@@ -1036,7 +1035,6 @@ function MatrixServer:part(room)
     local data = urllib.urlencode({
         access_token= self.access_token,
     })
-    -- TODO: close buffer, delete data, etc
     http(('/rooms/%s/leave?%s'):format(id, data), {postfields = "{}"},
         'http_cb', 10000, room.identifier)
 end
