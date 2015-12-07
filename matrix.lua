@@ -1462,6 +1462,8 @@ Room.create = function(obj)
     room.lines = {}
     -- Cache users for presence/nicklist
     room.users = {}
+    -- Table of ids currently typing
+    room.typing_ids = {}
     -- Cache the rooms power levels state
     room.power_levels = {users={}, users_default=0}
     -- Encryption status of room
@@ -2300,9 +2302,14 @@ function Room:parseChunk(chunk, backlog, chunktype)
         -- TODO: parse join_rules events --
         self.join_rules = chunk.content
     elseif chunk['type'] == 'm.typing' then
-        for _, id in pairs(chunk.content.user_ids) do
+        -- Store the typing ids in a table that the bar item can use
+        local typing_ids = {}
+        for _, id in ipairs(chunk.content.user_ids) do
             self:UpdatePresence(id, 'typing')
+            typing_ids[#typing_ids+1] = self.users[id]
         end
+        self.typing_ids = typing_ids
+        w.bar_item_update('matrix_typing_notice')
     elseif chunk['type'] == 'm.presence' then
         SERVER:UpdatePresence(chunk)
     elseif chunk['type'] == 'm.room.aliases' then
@@ -2867,12 +2874,25 @@ function typing_notification_cb(signal, sig_type, data)
 end
 
 function buffer_switch_cb(signal, sig_type, data)
+    -- Update bar item
+    w.bar_item_update('matrix_typing_notice')
     local current_buffer = w.current_buffer()
     local room = SERVER:findRoom(current_buffer)
     if room then
         room:MarkAsRead()
     end
     return w.WEECHAT_RC_OK
+end
+
+function typing_bar_item_cb(data, buffer, args)
+    local current_buffer = w.current_buffer()
+    local room = SERVER:findRoom(current_buffer)
+    if not room then return '' end
+    local typing_ids = table.concat(room.typing_ids, ' ')
+    if #typing_ids > 0 then
+        return "Typing: ".. typing_ids
+    end
+    return ''
 end
 
 if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "matrix_unload", "UTF-8") then
@@ -2936,4 +2956,5 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     SERVER:connect()
 
     w.hook_signal('buffer_switch', "buffer_switch_cb", "")
+    w.bar_item_new('matrix_typing_notice', 'typing_bar_item_cb', '')
 end

@@ -80,6 +80,13 @@ the size of the prefix and username lists:
 /set weechat.bar.nicklist.size 20
 ```
 
+To get an item on your status bar to show users currently typing in the active room buffer add the `matrix_typing_notice` item to the status bar like this:
+```
+/set weechat.bar.status.items [buffer_count],[buffer_plugin],buffer_number+:+buffer_name+{buffer_nicklist_count}+buffer_filter,[hotlist],completion,scroll,matrix_typing_notice
+```
+
+It's helpful to use tab-complete after typing the option name to get the current setting, and then just add it to the end
+
 ## To hot-update the plugin
 
 ```bash
