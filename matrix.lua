@@ -411,9 +411,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             if command:find'login' then
                 w.print('', ('matrix: Error code during login: %s'):format(
                     js['errcode']))
+                w.print('', 'matrix: Please verify your username and password')
             else
-                perr(js.errcode)
-                perr(js['error'])
+                perr(js['error'] .. '('..tostring(js.errcode)..')')
             end
             return w.WEECHAT_RC_OK
         end
@@ -621,6 +621,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             local room_id = js.room_id
         elseif command:find'receipt' then
             -- we don't care about receipts for now
+        elseif command:find'directory/room' then
+            --- XXX: parse result
+            mprint 'Created new alias for room'
         else
             dbg{['error'] = {msg='Unknown command in http cb', command=command,
                 js=js}}
@@ -1397,6 +1400,16 @@ function MatrixServer:CreateRoom(public, alias, invites)
         {customrequest = 'POST',
          postfields = json.encode(data),
         })
+end
+
+function MatrixServer:CreateRoomAlias(room_id, alias)
+    local data = {room_id = room_id}
+    alias = urllib.quote(alias)
+    http(('/directory/room/%s?access_token=%s')
+            :format(alias, urllib.quote(self.access_token)),
+        {customrequest = 'PUT',
+         postfields = json.encode(data),
+    })
 end
 
 function MatrixServer:ListRooms()
@@ -2552,9 +2565,9 @@ function query_command_cb(data, current_buffer, args)
 end
 
 function create_command_cb(data, current_buffer, args)
+    local command, args = split_args(args)
     local room = SERVER:findRoom(current_buffer)
-    if room or current_buffer == BUFFER then
-        local _, args = split_args(args)
+    if (room or current_buffer == BUFFER) and command == '/create' then
         if args then
             -- Room names are supposed to be without # and homeserver, so
             -- we try to help the user out here
@@ -2564,6 +2577,20 @@ function create_command_cb(data, current_buffer, args)
         else
             mprint 'Use /create room-name'
         end
+        return w.WEECHAT_RC_OK_EAT
+    else
+        return w.WEECHAT_RC_OK
+    end
+end
+
+function createalias_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, alias = split_args(args)
+        SERVER:CreateRoomAlias(room.identifier, alias)
+        return w.WEECHAT_RC_OK_EAT
+    elseif current_buffer == BUFFER then
+        mprint 'Use /createalias #alias:homeserver.domain from a room'
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2879,7 +2906,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     HOMEDIR = w.info_get('weechat_dir', '') .. '/'
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
-        'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'invite', 'nick',
+        'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'createalias', 'invite', 'nick',
         'whois', 'notice', 'msg', 'encrypt', 'public', 'names'
     }
     for _, c in pairs(commands) do
