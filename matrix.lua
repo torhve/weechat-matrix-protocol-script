@@ -1671,13 +1671,15 @@ function Room:_nickListChanged()
 end
 
 function Room:addNick(user_id, displayname)
+    local newnick = false
     if not displayname or displayname == json.null or displayname == '' then
         displayname = user_id:match('@(.*):.+')
     end
     if not self.users[user_id] then
         self.member_count = self.member_count + 1
-        self:_nickListChanged()
+        newnick = true
     end
+
     if self.users[user_id] ~= displayname then
         self.users[user_id] = displayname
     end
@@ -1713,6 +1715,10 @@ function Room:addNick(user_id, displayname)
         -- user_id straight up. Maybe we could invent some clever
         -- scheme here, like user(homeserver), user (2) or something
         self.users[user_id] = user_id
+    end
+
+    if newnick then -- run this after nick been added so it can be used
+        self:_nickListChanged()
     end
 
     return displayname
@@ -2359,15 +2365,15 @@ function Room:parseChunk(chunk, backlog, chunktype)
     elseif chunk['type'] == 'm.receipt' then
         -- TODO: figure out if we can do something sensible with read receipts
     else
-        perr(('Unknown event type %s%s%s in room %s%s%s'):format(
-            w.color'bold',
-            chunk.type,
-            default_color,
-            w.color'bold',
-            self.name,
-            default_color))
         if DEBUG then
-            dbg{chunk=chunk}
+            perr(('Unknown event type %s%s%s in room %s%s%s'):format(
+                w.color'bold',
+                chunk.type,
+                default_color,
+                w.color'bold',
+                self.name,
+                default_color))
+                dbg{chunk=chunk}
         end
     end
 end
