@@ -376,7 +376,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
     if DEBUG then
         dbg{reply={
             command=(command:gsub('access.*token=[0-9a-zA-Z%%]*', 'access_token=[redacted]')),
-            data=data,rc=rc,stdout=stdout,stderr=stderr}
+            extra=extra,rc=rc,stdout=stdout,stderr=stderr}
         }
     end
 
@@ -650,12 +650,10 @@ function real_http_cb(extra, command, rc, stdout, stderr)
 end
 
 function http_cb(data, command, rc, stdout, stderr)
-    if not DEBUG then
-        return real_http_cb(data, command, rc, stdout, stderr)
-    end
-    local status, result = xpcall(real_http_cb, debug.traceback, data, command, rc, stdout, stderr)
+    local status, result = pcall(real_http_cb, data, command, rc, stdout, stderr)
     if not status then
         perr('Error in http_cb: ' .. tostring(result))
+        perr(debug.traceback())
     end
     return result
 end
