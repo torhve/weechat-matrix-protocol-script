@@ -43,6 +43,7 @@ This script maps this as follows:
  Handle m.room.canonical_alias
  Fix kick line generation, currently looks like the kicker left the room.
  Support weechat.look.prefix_same_nick
+
 ]]
 
 local json = require 'cjson' -- apt-get install lua-cjson
@@ -441,6 +442,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             local backlog = false
             if extra == 'initial' then
                 backlog = true
+                SERVER.start_token = SERVER.end_token
             end
 
             -- Start with setting the global presence variable on the server
@@ -507,7 +509,12 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             end
             SERVER:poll()
         elseif command:find'messages' then
-            dbg('command msgs returned, '.. command)
+            local identifier = extra
+            local myroom = SERVER.rooms[identifier]
+            dbg{js=js}
+            for _, chunk in ipairs(js.chunk) do
+                myroom:parseChunk(chunk, true, 'messages')
+            end
         elseif command:find'/join/' then
             -- We came from a join command, fecth some messages
             local found = false
@@ -915,6 +922,7 @@ MatrixServer.create = function()
      server.rooms = {}
      -- Store user presences here since they are not local to the rooms
      server.presence = {}
+     server.start_token = nil
      server.end_token = 'END'
      server.typing_time = os.time()
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
@@ -1002,15 +1010,18 @@ function MatrixServer:post_initial_sync()
     end
 end
 
-function MatrixServer:getMessages(room_id)
+function MatrixServer:getMessages(room_id, dir, from, limit)
+    if not dir then dir = 'b' end
+    if not from then from = 'END' end
+    if not limit then limit = w.config_get_plugin('backlog_lines') end
     local data = urllib.urlencode({
-        access_token= self.access_token,
-        dir = 'b',
-        from = 'END',
-        limit = w.config_get_plugin('backlog_lines'),
+        access_token = self.access_token,
+        dir = dir,
+        from = from,
+        limit = limit,
     })
     http(('/rooms/%s/messages?%s')
-        :format(urllib.quote(room_id), data))
+        :format(urllib.quote(room_id), data), nil, nil, nil, room_id)
 end
 
 function MatrixServer:join(room)
@@ -2068,7 +2079,10 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
 
         -- If it has transaction id, it is from this client.
-        local is_from_this_client = chunk.unsigned.transaction_id
+        local is_from_this_client = false
+        if chunk.unsigned and chunk.unsigned.transaction_id then
+            is_from_this_client = true
+        end
 
         if content['msgtype'] == 'm.text' then
             body = content['body']
@@ -2833,6 +2847,17 @@ function names_command_cb(data, current_buffer, args)
     end
 end
 
+function more_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        SERVER:getMessages(room.identifier, 'b', 'END', 120)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        perr('/more Could not find room')
+    end
+    return w.WEECHAT_RC_OK
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -2925,7 +2950,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
         'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'createalias', 'invite', 'nick',
-        'whois', 'notice', 'msg', 'encrypt', 'public', 'names'
+        'whois', 'notice', 'msg', 'encrypt', 'public', 'names', 'more'
     }
     for _, c in pairs(commands) do
         w.hook_command_run('/'..c, c..'_command_cb', '')
@@ -2949,8 +2974,6 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         -- Completions
         table.concat(cmds, '|'),
         'matrix_command_cb', '')
-
-    -- TODO use hook window_scrolled to dynamically fetch more messages
 
     SERVER = MatrixServer.create()
     SERVER:connect()
