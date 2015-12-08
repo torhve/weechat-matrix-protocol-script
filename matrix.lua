@@ -490,7 +490,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         end
                         local ephemeral = room.ephemeral
                         -- Ignore Ephemeral Events during initial sync
-                        if extra and extra ~= 'initial' and ephemeral then
+                        if (extra and extra ~= 'initial') and ephemeral then
                             local chunks = ephemeral.events or {}
                             for _, chunk in ipairs(chunks) do
                                 myroom:parseChunk(chunk, backlog, 'states')
@@ -501,9 +501,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             end
             -- Now we have created rooms and can go over the rooms and update
             -- the presence for each nick
-            --for _, chunk in pairs(js.presence) do
-            --    SERVER:UpdatePresence(chunk.content)
-            --end
+            for _, e in pairs(js.presence.events) do
+                SERVER:UpdatePresence(e)
+            end
             if extra == 'initial' then
                 SERVER:post_initial_sync()
             end
@@ -511,7 +511,6 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         elseif command:find'messages' then
             local identifier = extra
             local myroom = SERVER.rooms[identifier]
-            dbg{js=js}
             for _, chunk in ipairs(js.chunk) do
                 myroom:parseChunk(chunk, true, 'messages')
             end
@@ -1679,42 +1678,43 @@ function Room:addNick(user_id, displayname)
     end
     if not self.users[user_id] then
         self.member_count = self.member_count + 1
+        self:_nickListChanged()
     end
     if self.users[user_id] ~= displayname then
         self.users[user_id] = displayname
-        local nick_c = ''
-        -- Check if this is ourselves
-        if user_id == SERVER.user_id then
-            w.buffer_set(self.buffer, "highlight_words", displayname)
-            w.buffer_set(self.buffer, "localvar_set_nick", displayname)
-            nick_c = 'chat_nick_self'
-        end
-        local ngroup, nprefix, nprefix_color = self:GetNickGroup(user_id)
-        -- Check if nick already exists
-        --local nick_ptr = w.nicklist_search_nick(self.buffer, '', displayname)
-        --if nick_ptr == '' then
-        nick_ptr = w.nicklist_add_nick(self.buffer,
+    end
+
+    local nick_c = self:GetPresenceNickColor(user_id, SERVER.presence[user_id])
+    -- Check if this is ourselves
+    if user_id == SERVER.user_id then
+        w.buffer_set(self.buffer, "highlight_words", displayname)
+        w.buffer_set(self.buffer, "localvar_set_nick", displayname)
+    end
+
+    local ngroup, nprefix, nprefix_color = self:GetNickGroup(user_id)
+    -- Check if nick already exists
+    --local nick_ptr = w.nicklist_search_nick(self.buffer, '', displayname)
+    --if nick_ptr == '' then
+    local nick_ptr = w.nicklist_add_nick(self.buffer,
+        self.nicklist_groups[ngroup],
+        displayname,
+        nick_c, nprefix, nprefix_color, 1)
+    --else
+    --    -- TODO CHANGE nickname here
+    --end
+    if nick_ptr == '' then
+        -- Duplicate nick names :(
+        -- We just add the full id to the nicklist so atleast it will show
+        -- but we should probably assign something new and track the state
+        -- so we can print msgs with non-conflicting nicks too
+        w.nicklist_add_nick(self.buffer,
             self.nicklist_groups[ngroup],
-            displayname,
+            user_id,
             nick_c, nprefix, nprefix_color, 1)
-        --else
-        --    -- TODO CHANGE nickname here
-        --end
-        if nick_ptr  == '' then
-            -- Duplicate nick names :(
-            -- We just add the full id to the nicklist so atleast it will show
-            -- but we should probably assign something new and track the state
-            -- so we can print msgs with non-conflicting nicks too
-            w.nicklist_add_nick(self.buffer,
-                self.nicklist_groups[ngroup],
-                user_id,
-                nick_c, nprefix, nprefix_color, 1)
-            -- Since we can't allow duplicate displaynames, we just use the
-            -- user_id straight up. Maybe we could invent some clever
-            -- scheme here, like user(homeserver), user (2) or something
-            self.users[user_id] = user_id
-        end
-        self:_nickListChanged()
+        -- Since we can't allow duplicate displaynames, we just use the
+        -- user_id straight up. Maybe we could invent some clever
+        -- scheme here, like user(homeserver), user (2) or something
+        self.users[user_id] = user_id
     end
 
     return displayname
@@ -1760,26 +1760,35 @@ function Room:ClearTyping()
     end
 end
 
+function Room:GetPresenceNickColor(user_id, presence)
+    local nick = self.users[user_id]
+    local nick_c
+    if user_id == SERVER.user_id then
+        -- Always use correct color for self
+        nick_c = 'weechat.color.chat_nick_self'
+    elseif presence == 'online' then
+        nick_c =  w.info_get('irc_nick_color_name', nick)
+    elseif presence == 'unavailable' then
+        nick_c = 'weechat.color.nicklist_away'
+    elseif presence == 'offline' then
+        nick_c = 'red'
+    elseif presence == nil then
+        nick_c = 'bar_fg'
+    else
+        dbg{err='unknown presence type',presence=presence}
+    end
+    return nick_c
+end
+
 function Room:UpdatePresence(user_id, presence)
     local nick_c = 'bar_fg'
-    local nick = self.users[user_id]
     if presence == 'typing' then
         self:UpdateNick(user_id, 'prefix', '!')
         self:UpdateNick(user_id, 'prefix_color', 'magenta')
         return
     end
-    if user_id ~= SERVER.user_id then
-        if presence == 'online' then
-            nick_c =  w.info_get('irc_nick_color_name', nick)
-        elseif presence == 'unavailable' then
-            nick_c = 'weechat.color.nicklist_away'
-        elseif presence == 'offline' then
-            nick_c = 'red'
-        else
-            dbg{err='unknown presence type',presence=presence}
-        end
-        self:UpdateNick(user_id, 'color', nick_c)
-    end
+    nick_c = self:GetPresenceNickColor(user_id, presence)
+    self:UpdateNick(user_id, 'color', nick_c)
 end
 
 function Room:UpdateNick(user_id, key, val)
@@ -1824,7 +1833,13 @@ function Room:UpdateNick(user_id, key, val)
                 w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
             end
         else
-            w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
+            -- Check if we are actually updating something, so there's less
+            -- updates issued (I think WeeChat sends all changes as nicklist
+            -- diffs to both UI code and to relay clients
+            local existing = w.nicklist_nick_get_string(self.buffer, nick_ptr, key)
+            if val ~= existing then
+                w.nicklist_nick_set(self.buffer, nick_ptr, key, val)
+            end
         end
     end
 end
@@ -1835,9 +1850,9 @@ function Room:delNick(id)
         local nick_ptr = w.nicklist_search_nick(self.buffer, '', nick)
         if nick_ptr ~= '' then
             w.nicklist_remove_nick(self.buffer, nick_ptr)
-            self.users[id] = nil
-            self.member_count = self.member_count - 1
         end
+        self.users[id] = nil
+        self.member_count = self.member_count - 1
         self:_nickListChanged()
         return true
     end
@@ -2205,6 +2220,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                     nick = self:addNick(sender, chunk.content.displayname)
                 end
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
+                tag'irc_nick'
                 local data = ('%s--\t%s%s%s is now known as %s%s'):format(
                     pcolor,
                     w.info_get('irc_nick_color', oldnick),
