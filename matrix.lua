@@ -2382,7 +2382,7 @@ function Room:Op(nick)
     for id, name in pairs(self.users) do
         if name == nick then
             -- patch the locally cached power levels
-            self.power_levels.users[id] = 100
+            self.power_levels.users[id] = 99
             SERVER:state(self.identifier, 'm.room.power_levels',
                 self.power_levels)
             break
@@ -2394,7 +2394,7 @@ function Room:Voice(nick)
     for id, name in pairs(self.users) do
         if name == nick then
             -- patch the locally cached power levels
-            self.power_levels.users[id] = 50
+            self.power_levels.users[id] = 25
             SERVER:state(self.identifier, 'm.room.power_levels',
                 self.power_levels)
             break
