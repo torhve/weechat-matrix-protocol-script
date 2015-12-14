@@ -407,13 +407,13 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             js = {}
             return w.WEECHAT_RC_OK
         end
-        if js['errcode'] then
+        if js['errcode'] or js['error'] then
             if command:find'login' then
-                w.print('', ('matrix: Error code during login: %s'):format(
-                    js['errcode']))
+                w.print('', ('matrix: Error code during login: %s, code: %s'):format(
+                    js['error'], js['errcode']))
                 w.print('', 'matrix: Please verify your username and password')
             else
-                perr(js['error'] .. '('..tostring(js.errcode)..')')
+                perr('API call returned error: '..js['error'] .. '('..tostring(js.errcode)..')')
             end
             return w.WEECHAT_RC_OK
         end
