@@ -440,9 +440,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             SERVER.poll_lock = false
 
             local backlog = false
+            local initial = false
             if extra == 'initial' then
-                backlog = true
-                SERVER.start_token = SERVER.end_token
+                initial = true
             end
 
             -- Start with setting the global presence variable on the server
@@ -459,7 +459,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         -- Monkey patch it to look like v1 object
                         room.room_id = identifier
                         local myroom
-                        if extra == 'initial' then
+                        if initial then
                             myroom = SERVER:addRoom(room)
                         else
                             myroom = SERVER.rooms[identifier]
@@ -483,6 +483,11 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         end
                         local timeline = room.timeline
                         if timeline then
+                            -- Save the prev_batch on the initial message so we
+                            -- know for later when we picked up the sync
+                            if initial then
+                                myroom.prev_batch = timeline.prev_batch
+                            end
                             local chunks = timeline.events or {}
                             for _, chunk in ipairs(chunks) do
                                 myroom:parseChunk(chunk, backlog, 'messages')
@@ -504,16 +509,25 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             for _, e in pairs(js.presence.events) do
                 SERVER:UpdatePresence(e)
             end
-            if extra == 'initial' then
+            if initial then
                 SERVER:post_initial_sync()
             end
             SERVER:poll()
         elseif command:find'messages' then
             local identifier = extra
             local myroom = SERVER.rooms[identifier]
-            for _, chunk in ipairs(js.chunk) do
+            myroom.prev_batch = js['end']
+            -- Freeze buffer
+            myroom:Freeze()
+            -- Clear buffer
+            myroom:Clear()
+            -- We request backwards direction, so iterate backwards
+            for i=#js.chunk,1,-1 do
+                local chunk = js.chunk[i]
                 myroom:parseChunk(chunk, true, 'messages')
             end
+            -- Thaw!
+            myroom:Thaw()
         elseif command:find'/join/' then
             -- We came from a join command, fecth some messages
             local found = false
@@ -919,7 +933,6 @@ MatrixServer.create = function()
      server.rooms = {}
      -- Store user presences here since they are not local to the rooms
      server.presence = {}
-     server.start_token = nil
      server.end_token = 'END'
      server.typing_time = os.time()
      server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
@@ -1630,6 +1643,61 @@ function Room:create_buffer()
             )
         end
     end
+end
+
+function Room:Freeze()
+    -- Function that saves all the lines in a buffer in a cache to be thawed
+    -- later. Used to redraw buffer when user requests more lines. Since
+    -- WeeChat can only render lines in order this is the workaround
+    local freezer = {}
+    local lines = w.hdata_pointer(w.hdata_get('buffer'), self.buffer, 'own_lines')
+    if lines == '' then return end
+    -- Start at top
+    local line = w.hdata_pointer(w.hdata_get('lines'), lines, 'first_line')
+    if line == '' then return end
+    local hdata_line = w.hdata_get('line')
+    local hdata_line_data = w.hdata_get('line_data')
+    while #line > 0 do
+        local data = w.hdata_pointer(hdata_line, line, 'data')
+        local tags = {}
+        local tag_count = w.hdata_integer(hdata_line_data, data, "tags_count")
+        if tag_count > 0 then
+            for i = 0, tag_count-1 do
+                local tag = w.hdata_string(hdata_line_data, data, i .. "|tags_array")
+                -- Skip notify tags since this is backlog
+                if not tag:match'^notify' then
+                    tags[#tags+1] = tag
+                end
+            end
+        end
+        tags[#tags+1] = 'no_log'
+        freezer[#freezer+1] = {
+            time = w.hdata_integer(hdata_line_data, data, 'time'),
+            tags = tags,
+            prefix = w.hdata_string(hdata_line_data, data, 'prefix'),
+            message = w.hdata_string(hdata_line_data, data, 'message'),
+        }
+        -- Move forward since we start at top
+        line = w.hdata_move(hdata_line, line, 1)
+    end
+    self.freezer = freezer
+end
+
+function Room:Thaw()
+    for _,l in ipairs(self.freezer) do
+        w.print_date_tags(
+            self.buffer,
+            l.time,
+            table.concat(l.tags, ','),
+            l.prefix .. '\t' .. l.message
+        )
+    end
+    -- Clear old data
+    self.freezer = nil
+end
+
+function Room:Clear()
+    w.buffer_clear(self.buffer)
 end
 
 function Room:destroy()
@@ -2870,7 +2938,7 @@ end
 function more_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        SERVER:getMessages(room.identifier, 'b', 'END', 120)
+        SERVER:getMessages(room.identifier, 'b', room.prev_batch, 120)
         return w.WEECHAT_RC_OK_EAT
     else
         perr('/more Could not find room')
