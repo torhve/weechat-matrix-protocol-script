@@ -443,6 +443,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             local initial = false
             if extra == 'initial' then
                 initial = true
+                backlog = true
             end
 
             -- Start with setting the global presence variable on the server
