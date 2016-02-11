@@ -312,7 +312,7 @@ end
 
 function matrix_command_cb(data, current_buffer, args)
     if args == 'connect' then
-        return command_connect(current_buffer, arg)
+        return command_connect(current_buffer)
     elseif args == 'debug' then
         if DEBUG then
             DEBUG = false
@@ -320,6 +320,29 @@ function matrix_command_cb(data, current_buffer, args)
         else
             DEBUG = true
             w.print('', SCRIPT_NAME..': debugging messages enabled')
+        end
+    elseif args:match('^msg ') then
+        local _
+        _, args = split_args(args) -- remove cmd
+        local roomarg, msg = split_args(args)
+        local room
+        for id, r in pairs(SERVER.rooms) do
+            -- Send /msg to a ID
+            if id == roomarg then
+                room = r
+                break
+            elseif roomarg == r.name then
+                room = r
+                break
+            elseif roomarg == r.roomname then
+                room = r
+                break
+            end
+        end
+
+        if room then
+            room:Msg(msg)
+            return w.WEECHAT_RC_OK_EAT
         end
     else
         perr("Command not found: " .. args)
@@ -3055,7 +3078,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
 
     weechat.hook_config('plugins.var.lua.matrix.debug', 'configuration_changed_cb', '')
 
-    local cmds = {'help', 'connect', 'debug'}
+    local cmds = {'help', 'connect', 'debug', 'msg'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
         '[command] [command options]',
         'Commands:\n' ..table.concat(cmds, '\n') ..
