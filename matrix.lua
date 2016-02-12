@@ -1022,7 +1022,14 @@ function MatrixServer:initial_sync()
     local data = urllib.urlencode({
         access_token = self.access_token,
         timeout = 1000*POLL_INTERVAL,
-        full_state = 'true'
+        full_state = 'true',
+        filter = json.encode({ -- timeline filter
+            room = {
+                timeline = {
+                    limit = tonumber(w.config_get_plugin('backlog_lines'))
+                }
+            }
+        })
     })
     local extra = 'initial'
     -- New v2 sync API is slow. Until we can easily ignore archived rooms
