@@ -52,7 +52,7 @@ local w = weechat
 
 local SCRIPT_NAME = "matrix"
 local SCRIPT_AUTHOR = "xt <xt@xt.gg>"
-local SCRIPT_VERSION = "2"
+local SCRIPT_VERSION = "3"
 local SCRIPT_LICENSE = "MIT"
 local SCRIPT_DESC = "Matrix.org chat plugin"
 local SCRIPT_COMMAND = SCRIPT_NAME
@@ -348,6 +348,24 @@ function matrix_command_cb(data, current_buffer, args)
         perr("Command not found: " .. args)
     end
 
+    return w.WEECHAT_RC_OK
+end
+
+function matrix_away_command_run_cb(data, buffer, args)
+    -- Callback for command /away -all
+    _, args = split_args(args) -- remove cmd
+    local opt, msg = split_args(args)
+    w.buffer_set(BUFFER, "localvar_set_away", msg)
+    for id, room in pairs(SERVER.rooms) do
+        if msg and msg ~= '' then
+            w.buffer_set(room.buffer, "localvar_set_away", msg)
+        else
+            -- Clear and delete
+            w.buffer_set(room.buffer, "localvar_set_away", '')
+            w.buffer_set(room.buffer, "localvar_del_away", nil)
+        end
+        new = w.buffer_get_string(room.buffer, "localvar_away")
+    end
     return w.WEECHAT_RC_OK
 end
 
@@ -3093,6 +3111,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         -- Completions
         table.concat(cmds, '|'),
         'matrix_command_cb', '')
+
+    w.hook_command_run('/away -all*', 'matrix_away_command_run_cb', '')
 
     SERVER = MatrixServer.create()
     SERVER:connect()
