@@ -360,9 +360,8 @@ function matrix_away_command_run_cb(data, buffer, args)
         if msg and msg ~= '' then
             w.buffer_set(room.buffer, "localvar_set_away", msg)
         else
-            -- Clear and delete
-            w.buffer_set(room.buffer, "localvar_set_away", '')
-            w.buffer_set(room.buffer, "localvar_del_away", nil)
+            -- Delete takes empty string, and not nil
+            w.buffer_set(room.buffer, "localvar_del_away", '')
         end
         new = w.buffer_get_string(room.buffer, "localvar_away")
     end
