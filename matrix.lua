@@ -363,7 +363,13 @@ function matrix_away_command_run_cb(data, buffer, args)
             -- Delete takes empty string, and not nil
             w.buffer_set(room.buffer, "localvar_del_away", '')
         end
-        new = w.buffer_get_string(room.buffer, "localvar_away")
+    end
+    if msg and msg ~= '' then
+        SERVER:SendPresence('unavailable', msg)
+        mprint 'You have been marked as unavailable'
+    else
+        SERVER:SendPresence('online', nil)
+        mprint 'You have been marked as online'
     end
     return w.WEECHAT_RC_OK
 end
@@ -684,6 +690,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         elseif command:find'directory/room' then
             --- XXX: parse result
             mprint 'Created new alias for room'
+        elseif command:match'presence/.*/status' then
+            -- Return of SendPresence which we don't have to handle because
+            -- it will be sent back to us as an event
         else
             dbg{['error'] = {msg='Unknown command in http cb', command=command,
                 js=js}}
@@ -1394,6 +1403,21 @@ function MatrixServer:set_membership(room_id, userid, data)
     http(('/rooms/%s/state/m.room.member/%s?access_token=%s')
         :format(urllib.quote(room_id),
           urllib.quote(userid),
+          urllib.quote(self.access_token)),
+        {customrequest = 'PUT',
+         postfields = json.encode(data),
+        })
+end
+
+function MatrixServer:SendPresence(p, status_msg)
+    -- One of: ["online", "offline", "unavailable", "free_for_chat"]
+    local data = {
+        presence = p,
+        status_msg = status_msg
+    }
+    http(('/presence/%s/status?access_token=%s')
+        :format(
+          urllib.quote(self.user_id),
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
          postfields = json.encode(data),
