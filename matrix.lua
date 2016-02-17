@@ -52,7 +52,7 @@ local w = weechat
 
 local SCRIPT_NAME = "matrix"
 local SCRIPT_AUTHOR = "xt <xt@xt.gg>"
-local SCRIPT_VERSION = "2"
+local SCRIPT_VERSION = "3"
 local SCRIPT_LICENSE = "MIT"
 local SCRIPT_DESC = "Matrix.org chat plugin"
 local SCRIPT_COMMAND = SCRIPT_NAME
@@ -348,6 +348,29 @@ function matrix_command_cb(data, current_buffer, args)
         perr("Command not found: " .. args)
     end
 
+    return w.WEECHAT_RC_OK
+end
+
+function matrix_away_command_run_cb(data, buffer, args)
+    -- Callback for command /away -all
+    _, args = split_args(args) -- remove cmd
+    local opt, msg = split_args(args)
+    w.buffer_set(BUFFER, "localvar_set_away", msg)
+    for id, room in pairs(SERVER.rooms) do
+        if msg and msg ~= '' then
+            w.buffer_set(room.buffer, "localvar_set_away", msg)
+        else
+            -- Delete takes empty string, and not nil
+            w.buffer_set(room.buffer, "localvar_del_away", '')
+        end
+    end
+    if msg and msg ~= '' then
+        SERVER:SendPresence('unavailable', msg)
+        mprint 'You have been marked as unavailable'
+    else
+        SERVER:SendPresence('online', nil)
+        mprint 'You have been marked as online'
+    end
     return w.WEECHAT_RC_OK
 end
 
@@ -667,6 +690,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         elseif command:find'directory/room' then
             --- XXX: parse result
             mprint 'Created new alias for room'
+        elseif command:match'presence/.*/status' then
+            -- Return of SendPresence which we don't have to handle because
+            -- it will be sent back to us as an event
         else
             dbg{['error'] = {msg='Unknown command in http cb', command=command,
                 js=js}}
@@ -1377,6 +1403,21 @@ function MatrixServer:set_membership(room_id, userid, data)
     http(('/rooms/%s/state/m.room.member/%s?access_token=%s')
         :format(urllib.quote(room_id),
           urllib.quote(userid),
+          urllib.quote(self.access_token)),
+        {customrequest = 'PUT',
+         postfields = json.encode(data),
+        })
+end
+
+function MatrixServer:SendPresence(p, status_msg)
+    -- One of: ["online", "offline", "unavailable", "free_for_chat"]
+    local data = {
+        presence = p,
+        status_msg = status_msg
+    }
+    http(('/presence/%s/status?access_token=%s')
+        :format(
+          urllib.quote(self.user_id),
           urllib.quote(self.access_token)),
         {customrequest = 'PUT',
          postfields = json.encode(data),
@@ -3093,6 +3134,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         -- Completions
         table.concat(cmds, '|'),
         'matrix_command_cb', '')
+
+    w.hook_command_run('/away -all*', 'matrix_away_command_run_cb', '')
 
     SERVER = MatrixServer.create()
     SERVER:connect()
