@@ -57,6 +57,8 @@ local SCRIPT_LICENSE = "MIT"
 local SCRIPT_DESC = "Matrix.org chat plugin"
 local SCRIPT_COMMAND = SCRIPT_NAME
 
+local WEECHAT_VERSION
+
 local SERVER
 local STDOUT = {}
 local OUT = {}
@@ -151,8 +153,7 @@ debug.traceback = function (...)
 end
 
 local function weechat_eval(text)
-    local version = w.info_get('version_number', '') or 0
-    if tonumber(version) >= 0x00040200 then
+    if WEECHAT_VERSION >= 0x00040200 then
         return w.string_eval_expression(text,{},{},{})
     end
     return text
@@ -434,7 +435,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
     -- Because of a bug in WeeChat sometimes the stdout gets prepended by
     -- any number of BEL chars (hex 07). Let's have a nasty workaround and
     -- just replace them away.
-    stdout = (stdout:gsub('^\007*', ''))
+    if WEECHAT_VERSION < 0x01030000 then -- fixed in 1.3
+        stdout = (stdout:gsub('^\007*', ''))
+    end
 
     if stdout ~= '' then
         if not STDOUT[command] then
@@ -3081,6 +3084,9 @@ function typing_bar_item_cb(data, buffer, args)
 end
 
 if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT_DESC, "matrix_unload", "UTF-8") then
+    -- Save WeeChat version to a global so other functionality can see it
+    local version = w.info_get('version_number', '') or 0
+    WEECHAT_VERSION = tonumber(version)
     local settings = {
         homeserver_url= {'https://matrix.org/', 'Full URL including port to your homeserver (including trailing slash) or use default matrix.org'},
         user= {'', 'Your homeserver username'},
@@ -3094,12 +3100,11 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         --olm_secret = {'', 'Password used to secure olm stores'},
     }
     -- set default settings
-    local version = w.info_get('version_number', '') or 0
     for option, value in pairs(settings) do
         if w.config_is_set_plugin(option) ~= 1 then
             w.config_set_plugin(option, value[1])
         end
-        if tonumber(version) >= 0x00030500 then
+        if WEECHAT_VERSION >= 0x00030500 then
             w.config_set_desc_plugin(option, ('%s (default: "%s")'):format(
                      value[2], value[1]))
         end
@@ -3136,9 +3141,14 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         'matrix_command_cb', '')
 
     w.hook_command_run('/away -all*', 'matrix_away_command_run_cb', '')
-
     SERVER = MatrixServer.create()
-    SERVER:connect()
+
+    if WEECHAT_VERSION < 0x01040000 then
+       perr(SCRIPT_NAME .. ': Please upgrade your WeeChat before using this script. Using this script on older WeeChat versions may lead to crashes. Many bugs have been fixed in newer versions of WeeChat.')
+       perr(SCRIPT_NAME .. ': Refusing to automatically connect you. If you insist, type /matrix connect, and do not act surprised if it crashes :-)')
+    else
+        SERVER:connect()
+    end
 
     w.hook_signal('buffer_switch', "buffer_switch_cb", "")
     w.bar_item_new('matrix_typing_notice', 'typing_bar_item_cb', '')
