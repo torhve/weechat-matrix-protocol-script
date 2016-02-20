@@ -178,6 +178,10 @@ urllib.urlencode = function(tbl)
     return table.concat(out, '&')
 end
 
+local function accesstoken_redact(str)
+    return (url:gsub('access.*token=[0-9a-zA-Z%%]*', 'access_token=[redacted]'))
+end
+
 local transaction_id_counter = 0
 local function get_next_transaction_id()
     transaction_id_counter = transaction_id_counter + 1
@@ -412,7 +416,7 @@ local function http(url, post, cb, timeout, extra, api_ns)
     url = homeserver_url .. url
     if DEBUG then
         dbg{request={
-            url=(url:gsub('access.*token=[0-9a-zA-Z%%]*', 'access_token=[redacted]')),
+            url=accesstoken_redact(url),
             post=post,extra=extra}
         }
     end
@@ -422,7 +426,7 @@ end
 function real_http_cb(extra, command, rc, stdout, stderr)
     if DEBUG then
         dbg{reply={
-            command=(command:gsub('access.*token=[0-9a-zA-Z%%]*', 'access_token=[redacted]')),
+            command=accesstoken_redact(command),
             extra=extra,rc=rc,stdout=stdout,stderr=stderr}
         }
     end
@@ -704,7 +708,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
 
     if tonumber(rc) == -2 then -- -2 == WEECHAT_HOOK_PROCESS_ERROR
         perr(('Call to API errored in command %s, maybe timeout?'):format(
-            command))
+            accesstoken_redact(command)))
         -- Empty cache in case of errors
         if STDOUT[command] then
             STDOUT[command] = nil
