@@ -2504,9 +2504,10 @@ function Room:parseChunk(chunk, backlog, chunktype)
         self:setName(self.canonical_alias)
     elseif chunk['type'] == 'm.room.redaction' then
         local redact_id = chunk.redacts
-        perr('Redacting message ' .. redact_id)
+        --perr('Redacting message ' .. redact_id)
         local result = self:UpdateLine(redact_id, w.color'darkgray'..'(redacted)')
-        if not result then
+        if not result and not backlog then
+            -- backlog doesn't send original message
             perr 'Could not find message to redact :('
         end
     elseif chunk['type'] == 'm.room.history_visibility' then
