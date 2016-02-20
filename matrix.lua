@@ -248,7 +248,9 @@ local function irc_formatting_to_html(s)
     s = byte_to_tag(s, '\02', '<em>', '</em>')
     s = byte_to_tag(s, '\029', '<i>', '</i>')
     s = byte_to_tag(s, '\031', '<u>', '</u>')
-    for i, c in pairs(ct) do
+    -- Iterate backwards to catch long colors before short
+    for i=#ct,1,-1 do
+        local c = ct[i]
         s = byte_to_tag(s, '\003'..tostring(i-1),
             '<font color="'..c..'">', '</font>')
     end
