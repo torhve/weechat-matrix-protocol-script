@@ -1049,6 +1049,9 @@ function MatrixServer:initial_sync()
     w.buffer_set(BUFFER, "localvar_set_server", "matrix")
     w.buffer_set(BUFFER, "title", ("Matrix: %s"):format(
         w.config_get_plugin'homeserver_url'))
+    if w.config_string(w.config_get('irc.look.server_buffer')) == 'merge_with_core' then
+        w.buffer_merge(BUFFER, w.buffer_search_main())
+    end
     w.buffer_set(BUFFER, "display", "auto")
     local data = urllib.urlencode({
         access_token = self.access_token,
