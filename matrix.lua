@@ -2043,6 +2043,8 @@ function Room:formatNick(user_id)
     if not nick then
         return user_id
     end
+    -- Remove nasty white space
+    nick = nick:gsub('[\n\t]', '')
     local color
     if user_id == SERVER.user_id then
         color = w.color('chat_nick_self')
