@@ -2702,8 +2702,8 @@ end
 function me_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:emote(args)
+        local _, message = split_args(args)
+        room:emote(message or '')
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
