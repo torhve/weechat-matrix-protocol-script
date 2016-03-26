@@ -2233,7 +2233,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
 
         local color = default_color
-        local body
+        local body = content['body']
         local content = chunk['content']
 
         if not content['msgtype'] then
@@ -2248,7 +2248,6 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
 
         if content['msgtype'] == 'm.text' then
-            body = content['body']
             -- TODO
             -- Parse HTML here:
             -- content.format = 'org.matrix.custom.html'
@@ -2269,7 +2268,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             else
                 nick_c = w.info_get('irc_nick_color', nick)
             end
-            tag"irc_action"
+            tag"irc_ction"
             local prefix_c = wcolor'weechat.color.chat_prefix_action'
             local prefix = wconf'weechat.look.prefix_action'
             body = ("%s%s %s%s"):format(
