@@ -136,6 +136,7 @@ local function dbg(message)
 end
 
 local dtraceback = debug.traceback
+-- luacheck: ignore debug
 debug.traceback = function (...)
     if select('#', ...) >= 1 then
         local err, lvl = ...
@@ -298,13 +299,13 @@ function command_help(current_buffer, args)
              w.print("", "Command not found: " .. args)
              return
          end
+         for cmd, helptext in pairs(help_cmds) do
+             w.print('', w.color("bold") .. cmd)
+             w.print('', (helptext or 'No help text').strip())
+             w.print('', '')
+        end
     end
 
-    for cmd, helptext in pairs(help_cmds) do
-        w.print('', w.color("bold") .. cmd)
-        w.print('', (helptext or 'No help text').strip())
-        w.print('', '')
-    end
 end
 
 function command_connect(current_buffer, args)
@@ -752,7 +753,6 @@ Olm.create = function()
         account:create()
         local _, err = account:generate_one_time_keys(5)
         perr(err)
-        self:save()
     else
         local _, err = account:unpickle(OLM_KEY, pickled)
         perr(err)
@@ -944,10 +944,11 @@ function Olm:read_session(device_key)
     if fd then
         perr(('olm: reading saved session device: %s'):format(device_key))
         local sessions = fd:read'*all'
-        local sessions = json.decode(sessions)
-        self.sessions[device_key] = sessions
+        self.sessions[device_key] = json.decode(sessions)
         fd:close()
         return sessions
+    else
+        perr(('olm: Error: %s, reading saved session device: %s'):format(err, device_key))
     end
     return {}
 end
@@ -995,6 +996,9 @@ MatrixServer.create = function()
      -- could lead to duplicate messages
      server.poll_lock = false
      server.olm = Olm.create()
+     -- Run save so we do not lose state. Create might create new account,
+     -- new keys, etc.
+     server.olm:save()
      return server
 end
 
@@ -1439,26 +1443,6 @@ function MatrixServer:SendTypingNotice(room_id)
         })
 end
 
-function upload_cb(data, command, rc, stdout, stderr)
-    if stderr ~= '' then
-        perr(('error: %s'):format(stderr))
-        return w.WEECHAT_RC_OK
-    end
-
-    if stdout ~= '' then
-        if not STDOUT[command] then
-            STDOUT[command] = {}
-        end
-        table.insert(STDOUT[command], stdout)
-    end
-
-    if tonumber(rc) >= 0 then
-        stdout = table.concat(STDOUT[command])
-        STDOUT[command] = nil
-        --- TODO improve content type detection, maybe let curl do it?
-    end
-end
-
 function MatrixServer:upload(room_id, filename)
     local content_type = 'image/jpeg'
     if command:find'png' then
@@ -1538,6 +1522,7 @@ function buffer_input_cb(b, buffer, data)
     for r_id, room in pairs(SERVER.rooms) do
         if buffer == room.buffer then
             SERVER:Msg(r_id, data)
+            break
         end
     end
     return w.WEECHAT_RC_OK
@@ -2233,8 +2218,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
 
         local color = default_color
-        local body = content['body']
         local content = chunk['content']
+        local body = content['body']
 
         if not content['msgtype'] then
             -- We don't support redactions
@@ -2268,7 +2253,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             else
                 nick_c = w.info_get('irc_nick_color', nick)
             end
-            tag"irc_ction"
+            tag"irc_action"
             local prefix_c = wcolor'weechat.color.chat_prefix_action'
             local prefix = wconf'weechat.look.prefix_action'
             body = ("%s%s %s%s"):format(
