@@ -1014,9 +1014,11 @@ MatrixServer.create = function()
      -- could lead to duplicate messages
      server.poll_lock = false
      server.olm = Olm.create()
-     -- Run save so we do not lose state. Create might create new account,
-     -- new keys, etc.
-     server.olm:save()
+     if server.olm then -- might not be available
+         -- Run save so we do not lose state. Create might create new account,
+         -- new keys, etc.
+         server.olm:save()
+     end
      return server
 end
 
