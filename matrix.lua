@@ -944,7 +944,8 @@ function Olm:read_session(device_key)
     if fd then
         perr(('olm: reading saved session device: %s'):format(device_key))
         local sessions = fd:read'*all'
-        self.sessions[device_key] = json.decode(sessions)
+        sessions = json.decode(sessions)
+        self.sessions[device_key] = sessions
         fd:close()
         return sessions
     else
