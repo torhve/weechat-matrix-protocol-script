@@ -239,6 +239,7 @@ local function byte_to_tag(s, byte, open_tag, close_tag)
 end
 
 local function irc_formatting_to_html(s)
+    -- TODO, support foreground and background?
     local ct = {'white','black','blue','green','red','maroon','purple',
         'orange','yellow','lightgreen','teal','cyan', 'lightblue',
         'fuchsia', 'gray', 'lightgray'}
@@ -268,6 +269,22 @@ local function strip_irc_formatting(s)
         :gsub("\22", "")
         :gsub("\29", "")
         :gsub("\31", ""))
+end
+
+local function irc_formatting_to_weechat_color(s)
+    -- TODO, support foreground and background?
+    -- - is atribute to remove formatting
+    -- | is to keep formatting during color changes
+    s = byte_to_tag(s, '\02', w.color'bold', w.color'-bold')
+    s = byte_to_tag(s, '\029', w.color'italic', w.color'-italic')
+    s = byte_to_tag(s, '\031', w.color'underline', w.color'-underline')
+    -- backwards to catch long numbers before short
+    for i=16,1,-1 do
+        i = tostring(i)
+        s = byte_to_tag(s, '\003'..i,
+            w.color("|"..i), w.color("-"..i))
+    end
+    return s
 end
 
 function matrix_unload()
@@ -1250,7 +1267,6 @@ function send(cbdata, calls)
             -- Generate local echo
             local color = default_color
             if msgtype == 'm.text' then
-                --- XXX: add no_log for encrypted?
                 --- XXX: no localecho for encrypted messages?
                 local tags = 'notify_none,localecho,no_highlight'
                 if room.encrypted then
@@ -1262,7 +1278,7 @@ function send(cbdata, calls)
                     tags, ("%s\t%s%s"):format(
                         room:formatNick(SERVER.user_id),
                         color,
-                        body
+                        irc_formatting_to_weechat_color(body)
                         )
                     )
             elseif msgtype == 'm.emote' then
@@ -1281,7 +1297,7 @@ function send(cbdata, calls)
                         w.color('chat_nick_self'),
                         room.users[SERVER.user_id],
                         color,
-                        body
+                        irc_formatting_to_weechat_color(body)
                         )
                     )
             end
