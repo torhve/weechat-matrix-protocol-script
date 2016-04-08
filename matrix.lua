@@ -572,6 +572,10 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                                 myroom:parseChunk(chunk, backlog, 'states')
                             end
                         end
+                        if backlog then
+                            -- All the state should be done. Try to get a good name for the room now.
+                            myroom:setName(myroom.identifier)
+                        end
                     end
                 end
             end
@@ -1556,8 +1560,6 @@ Room.create = function(obj)
     room.identifier = obj['room_id']
     room.server = 'matrix'
     room.member_count = 0
-    -- Cache lines for dedup?
-    room.lines = {}
     -- Cache users for presence/nicklist
     room.users = {}
     -- Table of ids currently typing
@@ -1580,9 +1582,13 @@ Room.create = function(obj)
             room.roomname = event.content.name
         elseif event['type'] == 'm.room.join_rule' then
             room.join_rule = event.content.join_rule
-        elseif event['type'] == 'm.room.member' then
+        elseif event['type'] == 'm.room.member' and event.state_key == SERVER.user_id then
             room.membership = 'invite'
             room.inviter = event.sender
+            if not room.name or not room.roomname then
+                room.name = room.inviter
+                room.roomname = room.inviter
+            end
             if w.config_get_plugin('autojoin_on_invite') == 'on' then
                 SERVER:join(room.identifier)
             else
@@ -1626,8 +1632,25 @@ function Room:setName(name)
         return
     end
     -- override hierarchy
-    if self.canonical_alias then name = self.canonical_alias end
-    if self.roomname then name = self.roomname end
+    if self.roomname then name = self.roomname
+    elseif self.canonical_alias then name = self.canonical_alias
+    elseif self.aliases then
+        for _, alias in ipairs(self.aliases or {}) do
+            name, _ = alias:match('(.+):(.+)')
+            break -- Use first
+        end
+    else
+        -- NO names. Set dynamic name based on members
+        -- TODO: maybe just improve setName-function to figure out its own name
+        local new = {}
+        for id, name in pairs(self.users) do
+            -- Set the name to the other party
+            if id ~= SERVER.user_id then
+                new[#new+1] = name
+            end
+        end
+        name = table.concat(new, ',')
+    end
 
     -- Check for dupe
     local buffer_name = w.buffer_get_string(self.buffer, 'name')
@@ -1784,7 +1807,7 @@ end
 function Room:_nickListChanged()
     -- Check the user count, if it's 2 or less then we decide this buffer
     -- is a "private" one like IRC's query type
-    if self.member_count == 3 then -- don't run code for every add > 2
+    if self.member_count == 3 then
         w.buffer_set(self.buffer, "localvar_set_type", 'channel')
         self.buffer_type = 'channel'
     elseif self.member_count == 2 then
@@ -1795,18 +1818,6 @@ function Room:_nickListChanged()
         w.buffer_set(self.buffer, "localvar_set_type", 'private')
         w.buffer_set(self.buffer, "localvar_set_server", self.server)
         self.buffer_type = 'query'
-        -- Check if the room name is identifier meaning we don't have a
-        -- name set yet, and should try and set one
-        local buffer_name = w.buffer_get_string(self.buffer, 'name')
-        if not self.roomname and not self.aliases then
-            for id, name in pairs(self.users) do
-                -- Set the name to the other party
-                if id ~= SERVER.user_id then
-                    self:setName(name)
-                    break
-                end
-            end
-        end
     elseif self.member_count == 1 then
         if not self.roomname and not self.aliases then
             -- Set the name to ourselves
