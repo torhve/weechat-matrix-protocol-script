@@ -1687,6 +1687,10 @@ function Room:topic(topic)
     SERVER:state(self.identifier, 'm.room.topic', {topic=topic})
 end
 
+function Room:Name(name)
+    SERVER:state(self.identifier, 'm.room.name', {name=name})
+end
+
 function Room:public()
     SERVER:state(self.identifier, 'm.room.join_rules', {join_rule='public'})
 end
@@ -3065,6 +3069,18 @@ function roominfo_command_cb(data, current_buffer, args)
     return w.WEECHAT_RC_OK
 end
 
+function name_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        local _, args = split_args(args)
+        room:Name(args)
+        return w.WEECHAT_RC_OK_EAT
+    else
+        perr('/name Could not find room')
+    end
+    return w.WEECHAT_RC_OK
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -3159,7 +3175,8 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
         'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'createalias', 'invite', 'nick',
-        'whois', 'notice', 'msg', 'encrypt', 'public', 'names', 'more', 'roominfo'
+        'whois', 'notice', 'msg', 'encrypt', 'public', 'names', 'more',
+        'roominfo', 'name'
     }
     for _, c in pairs(commands) do
         w.hook_command_run('/'..c, c..'_command_cb', '')
