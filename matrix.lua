@@ -1582,17 +1582,21 @@ Room.create = function(obj)
             room.roomname = event.content.name
         elseif event['type'] == 'm.room.join_rule' then
             room.join_rule = event.content.join_rule
-        elseif event['type'] == 'm.room.member' and event.state_key == SERVER.user_id then
-            room.membership = 'invite'
-            room.inviter = event.sender
-            if not room.name or not room.roomname then
-                room.name = room.inviter
-                room.roomname = room.inviter
-            end
-            if w.config_get_plugin('autojoin_on_invite') == 'on' then
-                SERVER:join(room.identifier)
+        elseif event['type'] == 'm.room.member' then
+            if event.state_key == SERVER.user_id then
+                room.membership = 'invite'
+                room.inviter = event.sender
+                if w.config_get_plugin('autojoin_on_invite') == 'on' then
+                    SERVER:join(room.identifier)
+                else
+                    mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.name or room.identifier, obj.inviter, room.identifier))
+                end
             else
-                mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.name or room.identifier, obj.inviter, room.identifier))
+                room:addNick(event.sender, event.content.displayname)
+                if not room.name or not room.roomname then
+                    room.name = room.users[room.inviter] or room.inviter
+                    room.roomname = room.users[room.inviter] or room.inviter
+                end
             end
         else
             if DEBUG then
@@ -1641,7 +1645,6 @@ function Room:setName(name)
         end
     else
         -- NO names. Set dynamic name based on members
-        -- TODO: maybe just improve setName-function to figure out its own name
         local new = {}
         for id, name in pairs(self.users) do
             -- Set the name to the other party
@@ -2476,6 +2479,8 @@ function Room:parseChunk(chunk, backlog, chunktype)
         else
             dbg{err= 'unknown membership type in parseChunk', chunk= chunk}
         end
+        -- Run setName on each member change in case we need to update room name
+        self:setName(self.identifier)
     elseif chunk['type'] == 'm.room.create' then
         self.creator = chunk.content.creator
     elseif chunk['type'] == 'm.room.power_levels' then
