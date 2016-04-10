@@ -1558,7 +1558,8 @@ Room.create = function(obj)
     setmetatable(room, Room)
     room.buffer = nil
     room.identifier = obj['room_id']
-    room.server = 'matrix'
+    local id, server = room.identifier:match('^(.*):(.+)$')
+    room.server = server
     room.member_count = 0
     -- Cache users for presence/nicklist
     room.users = {}
@@ -1610,7 +1611,7 @@ Room.create = function(obj)
     for _, state in ipairs(state_events) do
         if state['type'] == 'm.room.aliases' then
             for _, name in ipairs(state.content.aliases or {}) do
-                room.name, room.server = name:match('(.+):(.+)')
+                room.name, _ = name:match('(.+):(.+)')
                 break -- Use first
             end
         end
@@ -1636,8 +1637,14 @@ function Room:setName(name)
         return
     end
     -- override hierarchy
-    if self.roomname then name = self.roomname
-    elseif self.canonical_alias then name = self.canonical_alias
+    if self.roomname then
+        name = self.roomname
+    elseif self.canonical_alias then
+        name = self.canonical_alias
+        local short_name, _ = self.canonical_alias:match('(.+):(.+)')
+        if short_name then
+            name = short_name
+        end
     elseif self.aliases then
         for _, alias in ipairs(self.aliases or {}) do
             name, _ = alias:match('(.+):(.+)')
@@ -1646,13 +1653,17 @@ function Room:setName(name)
     else
         -- NO names. Set dynamic name based on members
         local new = {}
-        for id, name in pairs(self.users) do
+        for id, nick in pairs(self.users) do
             -- Set the name to the other party
             if id ~= SERVER.user_id then
-                new[#new+1] = name
+                new[#new+1] = nick
             end
         end
         name = table.concat(new, ',')
+    end
+
+    if not name or name == '' or name == json.null then
+        return
     end
 
     -- Check for dupe
@@ -1819,7 +1830,6 @@ function Room:_nickListChanged()
         -- in effect a query, but the matrix protocol doesn't have such
         -- a concept
         w.buffer_set(self.buffer, "localvar_set_type", 'private')
-        w.buffer_set(self.buffer, "localvar_set_server", self.server)
         self.buffer_type = 'query'
     elseif self.member_count == 1 then
         if not self.roomname and not self.aliases then
@@ -3042,6 +3052,17 @@ function more_command_cb(data, current_buffer, args)
     return w.WEECHAT_RC_OK
 end
 
+function roominfo_command_cb(data, current_buffer, args)
+    local room = SERVER:findRoom(current_buffer)
+    if room then
+        dbg{room=room}
+        return w.WEECHAT_RC_OK_EAT
+    else
+        perr('/roominfo Could not find room')
+    end
+    return w.WEECHAT_RC_OK
+end
+
 function closed_matrix_buffer_cb(data, buffer)
     BUFFER = nil
     return w.WEECHAT_RC_OK
@@ -3136,7 +3157,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     local commands = {
         'join', 'part', 'leave', 'me', 'topic', 'upload', 'query', 'list',
         'op', 'voice', 'deop', 'devoice', 'kick', 'create', 'createalias', 'invite', 'nick',
-        'whois', 'notice', 'msg', 'encrypt', 'public', 'names', 'more'
+        'whois', 'notice', 'msg', 'encrypt', 'public', 'names', 'more', 'roominfo'
     }
     for _, c in pairs(commands) do
         w.hook_command_run('/'..c, c..'_command_cb', '')
