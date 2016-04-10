@@ -1558,7 +1558,7 @@ Room.create = function(obj)
     setmetatable(room, Room)
     room.buffer = nil
     room.identifier = obj['room_id']
-    local id, server = room.identifier:match('^(.*):(.+)$')
+    local _, server = room.identifier:match('^(.*):(.+)$')
     room.server = server
     room.member_count = 0
     -- Cache users for presence/nicklist
@@ -1593,7 +1593,9 @@ Room.create = function(obj)
                     mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.name or room.identifier, obj.inviter, room.identifier))
                 end
             else
-                room:addNick(event.sender, event.content.displayname)
+                if event.content and event.content.displayname then
+                    room.users[event.sender] = event.content.displayname
+                end
                 if not room.name or not room.roomname then
                     room.name = room.users[room.inviter] or room.inviter
                     room.roomname = room.users[room.inviter] or room.inviter
