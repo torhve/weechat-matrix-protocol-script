@@ -503,10 +503,10 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         elseif command:find'/rooms/.*/initialSync' then
             local myroom = SERVER:addRoom(js)
             for _, chunk in ipairs(js['presence']) do
-                myroom:parseChunk(chunk, true, 'presence')
+                myroom:ParseChunk(chunk, true, 'presence')
             end
             for _, chunk in ipairs(js['messages']['chunk']) do
-                myroom:parseChunk(chunk, true, 'messages')
+                myroom:ParseChunk(chunk, true, 'messages')
             end
         elseif command:find'v2_alpha/sync' then
             SERVER.end_token = js.next_batch
@@ -554,7 +554,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         if states then
                             local chunks = room.state.events or {}
                             for _, chunk in ipairs(chunks) do
-                                myroom:parseChunk(chunk, backlog, 'states')
+                                myroom:ParseChunk(chunk, backlog, 'states')
                             end
                         end
                         local timeline = room.timeline
@@ -566,7 +566,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                             end
                             local chunks = timeline.events or {}
                             for _, chunk in ipairs(chunks) do
-                                myroom:parseChunk(chunk, backlog, 'messages')
+                                myroom:ParseChunk(chunk, backlog, 'messages')
                             end
                         end
                         local ephemeral = room.ephemeral
@@ -574,12 +574,12 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         if (extra and extra ~= 'initial') and ephemeral then
                             local chunks = ephemeral.events or {}
                             for _, chunk in ipairs(chunks) do
-                                myroom:parseChunk(chunk, backlog, 'states')
+                                myroom:ParseChunk(chunk, backlog, 'states')
                             end
                         end
                         if backlog then
                             -- All the state should be done. Try to get a good name for the room now.
-                            myroom:setName(myroom.identifier)
+                            myroom:SetName(myroom.identifier)
                         end
                     end
                 end
@@ -604,7 +604,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             -- We request backwards direction, so iterate backwards
             for i=#js.chunk,1,-1 do
                 local chunk = js.chunk[i]
-                myroom:parseChunk(chunk, true, 'messages')
+                myroom:ParseChunk(chunk, true, 'messages')
             end
             -- Thaw!
             myroom:Thaw()
@@ -1639,7 +1639,7 @@ Room.create = function(obj)
     return room
 end
 
-function Room:setName(name)
+function Room:SetName(name)
     if not name or name == '' or name == json.null then
         return
     end
@@ -1689,7 +1689,7 @@ function Room:setName(name)
     w.buffer_set(self.buffer, "localvar_set_channel", name)
 end
 
-function Room:topic(topic)
+function Room:Topic(topic)
     SERVER:state(self.identifier, 'm.room.topic', {topic=topic})
 end
 
@@ -1753,7 +1753,7 @@ function Room:create_buffer()
     w.buffer_set(self.buffer, "nicklist_display_groups", "0")
     w.buffer_set(self.buffer, "localvar_set_server", self.server)
     w.buffer_set(self.buffer, "localvar_set_roomid", self.identifier)
-    self:setName(self.name)
+    self:SetName(self.name)
     if self.membership == 'invite' then
         self:addNick(self.inviter)
         if w.config_get_plugin('autojoin_on_invite') ~= 'on' then
@@ -1846,7 +1846,7 @@ function Room:_nickListChanged()
     elseif self.member_count == 1 then
         if not self.roomname and not self.aliases then
             -- Set the name to ourselves
-            self:setName(self.users[SERVER.user_id])
+            self:SetName(self.users[SERVER.user_id])
         end
     end
 end
@@ -2212,7 +2212,7 @@ function Room:decryptChunk(chunk)
 end
 
 -- Parses a chunk of json meant for a room
-function Room:parseChunk(chunk, backlog, chunktype)
+function Room:ParseChunk(chunk, backlog, chunktype)
     local taglist = {}
     local tag = function(tag)
         -- Helper function to add tags
@@ -2377,7 +2377,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         local name = chunk['content']['name']
         if name ~= '' or name ~= json.null then
             self.roomname = name
-            self:setName(name)
+            self:SetName(name)
         end
     elseif chunk['type'] == 'm.room.member' then
         if chunk['content']['membership'] == 'join' then
@@ -2499,12 +2499,12 @@ function Room:parseChunk(chunk, backlog, chunktype)
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             end
         else
-            dbg{err= 'unknown membership type in parseChunk', chunk= chunk}
+            dbg{err= 'unknown membership type in ParseChunk', chunk= chunk}
         end
         -- if it's backlog this is done at the end from the caller place
         if not backlog then
-            -- Run setName on each member change in case we need to update room name
-            self:setName(self.identifier)
+            -- Run SetName on each member change in case we need to update room name
+            self:SetName(self.identifier)
         end
     elseif chunk['type'] == 'm.room.create' then
         self.creator = chunk.content.creator
@@ -2537,10 +2537,10 @@ function Room:parseChunk(chunk, backlog, chunktype)
     elseif chunk['type'] == 'm.room.aliases' then
         -- Use first alias, weechat doesn't really support multiple  aliases
         self.aliases = chunk.content.aliases
-        self:setName(chunk.content.aliases[1])
+        self:SetName(chunk.content.aliases[1])
     elseif chunk['type'] == 'm.room.canonical_alias' then
         self.canonical_alias = chunk.content.alias
-        self:setName(self.canonical_alias)
+        self:SetName(self.canonical_alias)
     elseif chunk['type'] == 'm.room.redaction' then
         local redact_id = chunk.redacts
         --perr('Redacting message ' .. redact_id)
@@ -2768,7 +2768,7 @@ function topic_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
         local _, topic = split_args(args)
-        room:topic(topic)
+        room:Topic(topic)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
