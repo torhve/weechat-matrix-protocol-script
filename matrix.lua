@@ -2641,6 +2641,15 @@ function Room:Whois(nick)
                 w.info_get('irc_nick_color', id),
                 id)
             w.print_date_tags(self.buffer, nil, 'notify_message', data)
+            local pdata = ('%s--\t%s%s%s has presence %s%s'):format(
+                pcolor,
+                w.info_get('irc_nick_color', nick),
+                nick,
+                default_color,
+                pcolor,
+                SERVER.presence[id] or 'offline')
+            w.print_date_tags(self.buffer, nil, 'notify_message', pdata)
+            -- TODO support printing status_msg field in presence data here
             break
         end
     end
