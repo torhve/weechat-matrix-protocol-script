@@ -709,9 +709,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                 end
                 mprint(('%s %s %s %s')
                     :format(
-                        name,
-                        r.num_joined_members,
-                        topic,
+                        name or '',
+                        r.num_joined_members or '',
+                        topic or '',
                         table.concat(r.aliases or {}, ', ')))
             end
         -- luacheck: ignore 542
