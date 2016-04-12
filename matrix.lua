@@ -3206,7 +3206,9 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
         '[command] [command options]',
         'Commands:\n' ..table.concat(cmds, '\n') ..
-        '\nUse /matrix help [command] to find out more\n',
+        '\nUse /matrix help [command] to find out more\n' ..
+        '\nSupported slash commands (i.e. /commands):\n' ..
+        table.concat(commands, ', '),
         -- Completions
         table.concat(cmds, '|'),
         'matrix_command_cb', '')
