@@ -1027,7 +1027,8 @@ MatrixServer.create = function()
 end
 
 function MatrixServer:UpdatePresence(c)
-    self.presence[c.sender] = c.content.presence
+    local user_id = c.sender or c.content.user_id
+    self.presence[user_id] = c.content.presence
     for id, room in pairs(self.rooms) do
         room:UpdatePresence(c.sender, c.content.presence)
     end
