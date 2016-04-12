@@ -1,6 +1,6 @@
 -- WeeChat Matrix.org Client
 -- vim: expandtab:ts=4:sw=4:sts=4
--- luacheck: globals weechat
+-- luacheck: globals weechat command_help command_connect matrix_command_cb matrix_away_command_run_cb configuration_changed_cb real_http_cb matrix_unload http_cb send buffer_input_cb poll polltimer_cb cleartyping otktimer_cb join_command_cb part_command_cb leave_command_cb me_command_cb topic_command_cb upload_command_cb query_command_cb create_command_cb createalias_command_cb invite_command_cb list_command_cb op_command_cb voice_command_cb devoice_command_cb kick_command_cb deop_command_cb nick_command_cb whois_command_cb notice_command_cb msg_command_cb encrypt_command_cb public_command_cb names_command_cb more_command_cb roominfo_command_cb name_command_cb closed_matrix_buffer_cb closed_matrix_room_cb typing_notification_cb buffer_switch_cb typing_bar_item_cb
 
 --[[
  Author: xt <xt@xt.gg>
@@ -186,6 +186,10 @@ local function get_next_transaction_id()
     return transaction_id_counter
 end
 
+--[[
+-- Function for signing json, unused for now, we hand craft the required
+-- signed json in the encryption function. But I think this function will be
+-- needed in the future so leaving it here in a commented version
 local function sign_json(json_object, signing_key, signing_name)
     -- See: https://github.com/matrix-org/matrix-doc/blob/master/specification/31_event_signing.rst
     -- Maybe use:http://regex.info/code/JSON.lua which sorts keys
@@ -209,6 +213,7 @@ local function sign_json(json_object, signing_key, signing_name)
 
     return json_object
 end
+--]]
 
 local function split_args(args)
     local function_name, arg = args:match('^(.-) (.*)$')
@@ -311,7 +316,7 @@ end
 
 function command_help(current_buffer, args)
     if args then
-         local help_cmds = {args= help_cmds[args]}
+         local help_cmds = {args=args}
          if not help_cmds then
              w.print("", "Command not found: " .. args)
              return
@@ -678,6 +683,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             if js.content_uri then
                 SERVER:Msg(room_id, js.content_uri)
             end
+        -- luacheck: ignore 542
         elseif command:find'/typing/' then
             -- either it errs or it is empty
         elseif command:find'/state/' then
@@ -688,7 +694,6 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             -- XXX Errorhandling
             -- TODO save event id to use for localecho
         elseif command:find'createRoom' then
-            local room_id = js.room_id
             -- We get join events, so we don't have to do anything
         elseif command:find'/publicRooms' then
             mprint 'Public rooms:'
@@ -709,8 +714,8 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         topic,
                         table.concat(r.aliases, ', ')))
             end
+        -- luacheck: ignore 542
         elseif command:find'/invite' then
-            local room_id = js.room_id
         elseif command:find'receipt' then
             -- we don't care about receipts for now
         elseif command:find'directory/room' then
@@ -929,7 +934,7 @@ function Olm:create_session(user_id, device_id)
         return
     end
     local sessions = self:get_sessions(device_key)
-    if true then -- TODO
+    if not sessions[device_key] then
         perr(('olm: creating NEW session for: %s, and device: %s'):format(user_id, device_id))
         local session = olm.Session.new()
         local otk = self.otks[user_id..':'..device_id]
@@ -1348,12 +1353,9 @@ function send(cbdata, calls)
                     end
                     local sessions = olmd:get_sessions(device_key)
                     -- Use the session with the lowest ID
+                    -- TODO: figure out how to pick session better?
                     table.sort(sessions)
-                    local pickled
-                    for k, v in pairs(sessions) do
-                        pickled = v
-                        break
-                    end
+                    local pickled = next(sessions)
                     if pickled then
                         local session = olm.Session.new()
                         session:unpickle(OLM_KEY, pickled)
@@ -1467,6 +1469,7 @@ function MatrixServer:SendTypingNotice(room_id)
         })
 end
 
+--[[
 function MatrixServer:upload(room_id, filename)
     local content_type = 'image/jpeg'
     if command:find'png' then
@@ -1481,6 +1484,7 @@ function MatrixServer:upload(room_id, filename)
     --    arg2 = 'filedata=@'..filename
     --    }, 30*1000, 'upload_cb', room_id)
 end
+--]]
 
 function MatrixServer:CreateRoom(public, alias, invites)
     local data = {}
@@ -1613,9 +1617,9 @@ Room.create = function(obj)
     local state_events = obj.state or {}
     for _, state in ipairs(state_events) do
         if state['type'] == 'm.room.aliases' then
-            for _, name in ipairs(state.content.aliases or {}) do
+            local name = state.content.aliases[1]
+            if name then
                 room.name, _ = name:match('(.+):(.+)')
-                break -- Use first
             end
         end
     end
@@ -1649,9 +1653,10 @@ function Room:setName(name)
             name = short_name
         end
     elseif self.aliases then
-        for _, alias in ipairs(self.aliases or {}) do
+        local alias = self.aliases[1]
+        if name then
+            local _
             name, _ = alias:match('(.+):(.+)')
-            break -- Use first
         end
     else
         -- NO names. Set dynamic name based on members
@@ -1986,7 +1991,7 @@ function Room:UpdateNick(user_id, key, val)
             -- No WeeChat API for changing a nick's group so we will have to
             -- delete the nick from the old nicklist and add it to the correct
             -- nicklist group
-            local d_nick_ptr = w.nicklist_remove_nick(self.buffer, nick_ptr)
+            w.nicklist_remove_nick(self.buffer, nick_ptr)
             -- TODO please check if this call fails, if it does it means the
             -- WeeChat version is old and has a bug so it can't remove nicks
             -- and so it needs some workaround
@@ -2059,7 +2064,7 @@ function Room:UpdateLine(id, message)
             end
             if needsupdate then
                 w.hdata_update(hdata_line_data, data, {
-                    prefix = prefix,
+                    prefix = nil,
                     message = message,
                     tags_array = table.concat(tags, ','),
                     })
@@ -2282,6 +2287,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
             is_from_this_client = true
         end
 
+        -- luacheck: ignore 542
         if content['msgtype'] == 'm.text' then
             -- TODO
             -- Parse HTML here:
@@ -2377,8 +2383,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         if chunk['content']['membership'] == 'join' then
             tag"irc_join"
             --- FIXME shouldn't be neccessary adding all the time
-            local nick = self.users[sender] or self:addNick(sender, chunk.content.displayname)
-            local name = chunk.content.displayname
+            local name = self.users[sender] or self:addNick(sender, chunk.content.displayname)
             if not name or name == json.null or name == '' then
                 name = sender
             end
@@ -2399,7 +2404,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
                         return
                     end
                     self:delNick(sender)
-                    nick = self:addNick(sender, chunk.content.displayname)
+                    self:addNick(sender, chunk.content.displayname)
                 end
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
                 tag'irc_nick'
@@ -2546,6 +2551,7 @@ function Room:parseChunk(chunk, backlog, chunktype)
         end
     elseif chunk['type'] == 'm.room.history_visibility' then
         self.history_visibility = chunk.content.history_visibility
+    -- luacheck: ignore 542
     elseif chunk['type'] == 'm.receipt' then
         -- TODO: figure out if we can do something sensible with read receipts
     else
@@ -2711,12 +2717,12 @@ end
 function join_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if current_buffer == BUFFER or room then
-        local _, args = split_args(args)
-        if not args then
+        local _, alias = split_args(args)
+        if not alias then
             -- To support running /join on a invited room without args
             SERVER:join(room.identifier)
         else
-            SERVER:join(args)
+            SERVER:join(alias)
         end
         return w.WEECHAT_RC_OK_EAT
     else
@@ -2752,8 +2758,8 @@ end
 function topic_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:topic(args)
+        local _, topic = split_args(args)
+        room:topic(topic)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2763,8 +2769,8 @@ end
 function upload_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:upload(args)
+        local _, upload = split_args(args)
+        room:upload(upload)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2774,9 +2780,9 @@ end
 function query_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
+        local _, query = split_args(args)
         for id, displayname in pairs(room.users) do
-            if displayname == args then
+            if displayname == query then
                 -- Create a new room and invite the guy
                 SERVER:CreateRoom(false, nil, {id})
                 return w.WEECHAT_RC_OK_EAT
@@ -2788,13 +2794,13 @@ function query_command_cb(data, current_buffer, args)
 end
 
 function create_command_cb(data, current_buffer, args)
-    local command, args = split_args(args)
+    local command, arg = split_args(args)
     local room = SERVER:findRoom(current_buffer)
     if (room or current_buffer == BUFFER) and command == '/create' then
-        if args then
+        if arg then
             -- Room names are supposed to be without # and homeserver, so
             -- we try to help the user out here
-            local alias = args:match'#?(.*):?'
+            local alias = arg:match'#?(.*):?'
             -- Create a non-public room with argument as alias
             SERVER:CreateRoom(false, alias, nil)
         else
@@ -2823,8 +2829,8 @@ end
 function invite_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:Invite(args)
+        local _, invitee = split_args(args)
+        room:Invite(invitee)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2844,8 +2850,8 @@ end
 function op_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:Op(args)
+        local _, target = split_args(args)
+        room:Op(target)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2855,8 +2861,8 @@ end
 function voice_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:Voice(args)
+        local _, target = split_args(args)
+        room:Voice(target)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2866,8 +2872,8 @@ end
 function devoice_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:Devoice(args)
+        local _, target = split_args(args)
+        room:Devoice(target)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2876,8 +2882,8 @@ end
 function deop_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:Deop(args)
+        local _, target = split_args(args)
+        room:Deop(target)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2887,8 +2893,8 @@ end
 function kick_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:Kick(args)
+        local _, target = split_args(args)
+        room:Kick(target)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
@@ -2930,8 +2936,8 @@ function notice_command_cb(data, current_buffer, args)
 end
 
 function msg_command_cb(data, current_buffer, args)
-    local _, args = split_args(args)
-    local mask, msg = split_args(args)
+    local _, msgmask = split_args(args)
+    local mask, msg = split_args(msgmask)
     local room
     -- WeeChat uses * as a mask for current buffer
     if mask == '*' then
@@ -2960,11 +2966,11 @@ end
 function encrypt_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        if args == 'on' then
+        local _, arg = split_args(args)
+        if arg == 'on' then
             mprint('Enabling encryption for outgoing messages in room ' .. tostring(room.name))
             room:Encrypt()
-        elseif args == 'off' then
+        elseif arg == 'off' then
             mprint('Disabling encryption for outgoing messages in room ' .. tostring(room.name))
             room.encrypted = false
         else
@@ -3076,8 +3082,8 @@ end
 function name_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
-        local _, args = split_args(args)
-        room:Name(args)
+        local _, name = split_args(args)
+        room:Name(name)
         return w.WEECHAT_RC_OK_EAT
     else
         perr('/name Could not find room')
