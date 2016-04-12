@@ -470,7 +470,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
     end
 
     if tonumber(rc) >= 0 then
-        stdout = table.concat(STDOUT[command])
+        stdout = table.concat(STDOUT[command] or {})
         STDOUT[command] = nil
         -- Protected call in case of JSON errors
         local success, js = pcall(json.decode, stdout)
@@ -2496,8 +2496,11 @@ function Room:parseChunk(chunk, backlog, chunktype)
         else
             dbg{err= 'unknown membership type in parseChunk', chunk= chunk}
         end
-        -- Run setName on each member change in case we need to update room name
-        self:setName(self.identifier)
+        -- if it's backlog this is done at the end from the caller place
+        if not backlog then
+            -- Run setName on each member change in case we need to update room name
+            self:setName(self.identifier)
+        end
     elseif chunk['type'] == 'm.room.create' then
         self.creator = chunk.content.creator
     elseif chunk['type'] == 'm.room.power_levels' then
