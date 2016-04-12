@@ -712,7 +712,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                         name,
                         r.num_joined_members,
                         topic,
-                        table.concat(r.aliases, ', ')))
+                        table.concat(r.aliases or {}, ', ')))
             end
         -- luacheck: ignore 542
         elseif command:find'/invite' then
