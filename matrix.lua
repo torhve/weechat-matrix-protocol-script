@@ -762,7 +762,8 @@ function upload_cb(data, command, rc, stdout, stderr)
 
     local uri = js.content_uri
     if not uri then
-        mprint(('error\tNo content_uri after upload. Stdout: %s'), stdout)
+        mprint(('error\tNo content_uri after upload. Stdout: %s, stderr: %s'):format(stdout, stderr))
+        return w.WEECHAT_RC_OK
     end
 
     local room_id = data
@@ -2322,7 +2323,8 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             -- content.format = 'org.matrix.custom.html'
             -- fontent.formatted_body...
         elseif content['msgtype'] == 'm.image' then
-            local url = content['url']:gsub('mxc://',
+            local url = content['url'] or ''
+            url = url:gsub('mxc://',
                 w.config_get_plugin('homeserver_url')
                 .. '_matrix/media/v1/download/')
             body = content['body'] .. ' ' .. url
