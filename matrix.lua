@@ -1,6 +1,6 @@
 -- WeeChat Matrix.org Client
 -- vim: expandtab:ts=4:sw=4:sts=4
--- luacheck: globals weechat command_help command_connect matrix_command_cb matrix_away_command_run_cb configuration_changed_cb real_http_cb matrix_unload http_cb send buffer_input_cb poll polltimer_cb cleartyping otktimer_cb join_command_cb part_command_cb leave_command_cb me_command_cb topic_command_cb upload_command_cb query_command_cb create_command_cb createalias_command_cb invite_command_cb list_command_cb op_command_cb voice_command_cb devoice_command_cb kick_command_cb deop_command_cb nick_command_cb whois_command_cb notice_command_cb msg_command_cb encrypt_command_cb public_command_cb names_command_cb more_command_cb roominfo_command_cb name_command_cb closed_matrix_buffer_cb closed_matrix_room_cb typing_notification_cb buffer_switch_cb typing_bar_item_cb
+-- luacheck: globals weechat command_help command_connect matrix_command_cb matrix_away_command_run_cb configuration_changed_cb real_http_cb matrix_unload http_cb upload_cb send buffer_input_cb poll polltimer_cb cleartyping otktimer_cb join_command_cb part_command_cb leave_command_cb me_command_cb topic_command_cb upload_command_cb query_command_cb create_command_cb createalias_command_cb invite_command_cb list_command_cb op_command_cb voice_command_cb devoice_command_cb kick_command_cb deop_command_cb nick_command_cb whois_command_cb notice_command_cb msg_command_cb encrypt_command_cb public_command_cb names_command_cb more_command_cb roominfo_command_cb name_command_cb closed_matrix_buffer_cb closed_matrix_room_cb typing_notification_cb buffer_switch_cb typing_bar_item_cb
 
 --[[
  Author: xt <xt@xt.gg>
@@ -753,6 +753,26 @@ function http_cb(data, command, rc, stdout, stderr)
     return result
 end
 
+function upload_cb(data, command, rc, stdout, stderr)
+    local success, js = pcall(json.decode, stdout)
+    if not success then
+        mprint(('error\t%s when getting uploaded URI: %s'):format(js, stdout))
+        return w.WEECHAT_RC_OK
+    end
+
+    local uri = js.content_uri
+    if not uri then
+        mprint(('error\tNo content_uri after upload. Stdout: %s'), stdout)
+    end
+
+    local room_id = data
+    local body = 'Image'
+    local msgtype = 'm.image'
+    SERVER:Msg(room_id, body, msgtype, uri)
+
+    return w.WEECHAT_RC_OK
+end
+
 Olm = {}
 Olm.__index = Olm
 Olm.create = function()
@@ -1208,7 +1228,7 @@ function MatrixServer:SendReadReceipt(room_id, event_id)
       v2_api_ns )
 end
 
-function MatrixServer:Msg(room_id, body, msgtype)
+function MatrixServer:Msg(room_id, body, msgtype, url)
     -- check if there's an outgoing message timer already
     self:ClearSendTimer()
 
@@ -1220,7 +1240,7 @@ function MatrixServer:Msg(room_id, body, msgtype)
         OUT[room_id] = {}
     end
     -- Add message to outgoing queue of messages for this room
-    table.insert(OUT[room_id], {msgtype, body})
+    table.insert(OUT[room_id], {msgtype, body, url})
 
     self:StartSendTimer()
 end
@@ -1249,6 +1269,7 @@ function send(cbdata, calls)
         local body = {}
         local htmlbody = {}
         local msgtype
+        local url
 
         local ishtml = false
 
@@ -1268,6 +1289,9 @@ function send(cbdata, calls)
             end
             table.insert(htmlbody, html )
             table.insert(body, msg[2] )
+            if msg[3] then -- Primarily image upload
+                url = msg[3]
+            end
         end
         body = table.concat(body, '\n')
 
@@ -1319,6 +1343,7 @@ function send(cbdata, calls)
             postfields = {
                 msgtype = msgtype,
                 body = body,
+                url = url,
         }}
 
         if ishtml then
@@ -1369,7 +1394,8 @@ function send(cbdata, calls)
                             sender_device = olmd.device_id,
                             content = {
                                 msgtype = msgtype,
-                                body = data.postfields.body or ''
+                                body = data.postfields.body or '',
+                                url = url
                             }
                         }
                         -- encrypt body
@@ -1469,22 +1495,24 @@ function MatrixServer:SendTypingNotice(room_id)
         })
 end
 
---[[
-function MatrixServer:upload(room_id, filename)
+function MatrixServer:Upload(room_id, filename)
     local content_type = 'image/jpeg'
-    if command:find'png' then
+    if filename:match'%.[Pp][nN][gG]$' then
         content_type = 'image/png'
     end
-    -- TODO:
-    --local url = w.config_get_plugin('homeserver_url') ..
-    --    ('_matrix/media/v1/upload?access_token=%s')
-    --    :format( urllib.quote(SERVER.access_token) )
-    --w.hook_process_hashtable('curl',
-    --    {arg1 = '-F',
-    --    arg2 = 'filedata=@'..filename
-    --    }, 30*1000, 'upload_cb', room_id)
+    local url = w.config_get_plugin('homeserver_url') ..
+        ('_matrix/media/r0/upload?access_token=%s')
+        :format( urllib.quote(SERVER.access_token) )
+    w.hook_process_hashtable('curl', {
+        arg1 = '--data-binary', -- no encoding of data
+        arg2 = '@'..filename, -- @means curl will load the filename
+        arg3 = '-XPOST', -- HTTP POST method
+        arg4 = '-H', -- header
+        arg5 = 'Content-Type: '..content_type,
+        arg6 = '-s', -- silent
+        arg7 = url,
+    }, 30*1000, 'upload_cb', room_id)
 end
---]]
 
 function MatrixServer:CreateRoom(public, alias, invites)
     local data = {}
@@ -1701,8 +1729,8 @@ function Room:public()
     SERVER:state(self.identifier, 'm.room.join_rules', {join_rule='public'})
 end
 
-function Room:upload(filename)
-    SERVER:upload(self.identifier, filename)
+function Room:Upload(filename)
+    SERVER:Upload(self.identifier, filename)
 end
 
 function Room:Msg(msg)
@@ -2777,7 +2805,7 @@ function upload_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room then
         local _, upload = split_args(args)
-        room:upload(upload)
+        room:Upload(upload)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
