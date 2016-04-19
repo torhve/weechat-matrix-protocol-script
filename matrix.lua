@@ -252,6 +252,15 @@ local function irc_formatting_to_html(s)
     s = byte_to_tag(s, '\02', '<em>', '</em>')
     s = byte_to_tag(s, '\029', '<i>', '</i>')
     s = byte_to_tag(s, '\031', '<u>', '</u>')
+    -- First do full color strings with reset.
+    -- Iterate backwards to catch long colors before short
+    for i=#ct,1,-1 do
+        s = s:gsub(
+            '\003'..tostring(i-1)..'(.-)\003',
+            '<font color="'..ct[i]..'">%1</font>')
+    end
+
+    -- Then replace unmatch colors
     -- Iterate backwards to catch long colors before short
     for i=#ct,1,-1 do
         local c = ct[i]
