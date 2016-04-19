@@ -434,6 +434,9 @@ local function http(url, post, cb, timeout, extra, api_ns)
     if not post.accept_encoding then
         post.accept_encoding = 'application/json'
     end
+    if not post.header then
+        post.header = 1 -- Request http headers in the response
+    end
 
     local homeserver_url = w.config_get_plugin('homeserver_url')
     homeserver_url = homeserver_url .. api_ns
@@ -445,6 +448,14 @@ local function http(url, post, cb, timeout, extra, api_ns)
         }
     end
     w.hook_process_hashtable('url:' .. url, post, timeout, cb, extra)
+end
+
+local function parse_http_statusline(line)
+    local httpversion, status_code, reason_phrase = line:match("^HTTP/(1%.[01]) (%d%d%d) (.-)\r?\n")
+    if not httpversion then
+        return
+    end
+    return tonumber(httpversion), tonumber(status_code), reason_phrase
 end
 
 function real_http_cb(extra, command, rc, stdout, stderr)
@@ -477,6 +488,17 @@ function real_http_cb(extra, command, rc, stdout, stderr)
     if tonumber(rc) >= 0 then
         stdout = table.concat(STDOUT[command] or {})
         STDOUT[command] = nil
+        local httpversion, status_code, reason_phrase = parse_http_statusline(stdout)
+        if not httpversion then
+            perr(('Invalid http request: %s'):format(stdout))
+            return w.WEECHAT_RC_OK
+        end
+        if status_code >= 500 then
+            perr(('HTTP API returned error. Code: %s, reason: %s'):format(status_code, reason_phrase))
+            return w.WEECHAT_RC_OK
+        end
+        -- Skip to data
+        stdout = (stdout:match('.-\r?\n\r?\n(.*)'))
         -- Protected call in case of JSON errors
         local success, js = pcall(json.decode, stdout)
         if not success then
