@@ -427,7 +427,7 @@ local function http(url, post, cb, timeout, extra, api_ns)
         extra = nil
     end
     if not api_ns then
-        api_ns = "_matrix/client/api/v1"
+        api_ns = "_matrix/client/r0"
     end
 
     -- Add accept encoding by default if it's not already there
@@ -530,7 +530,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             for _, chunk in ipairs(js['messages']['chunk']) do
                 myroom:ParseChunk(chunk, true, 'messages')
             end
-        elseif command:find'v2_alpha/sync' then
+        elseif command:find'/sync' then
             SERVER.end_token = js.next_batch
 
             -- We have a new end token, which means we safely can release the
@@ -989,7 +989,7 @@ function Olm:create_session(user_id, device_id)
         if otk then
             session:create_outbound(self.account, device_key, otk)
             local session_id = session:session_id()
-            perr('Session ID:'..tostring(session_id))
+            perr('olm: Session ID:'..tostring(session_id))
             self:store_session(device_key, session)
         end
         session:clear()
@@ -1141,7 +1141,7 @@ function MatrixServer:initial_sync()
     -- New v2 sync API is slow. Until we can easily ignore archived rooms
     -- let's increase the timer for the initial login
     local login_timer = 60*5*1000
-    http('/sync?'..data, nil, 'http_cb', login_timer, extra, v2_api_ns)
+    http('/sync?'..data, nil, 'http_cb', login_timer, extra)
 end
 
 function MatrixServer:post_initial_sync()
@@ -1212,7 +1212,7 @@ function MatrixServer:poll()
         full_state = 'false',
         since = self.end_token
     })
-    http('/sync?'..data, nil, 'http_cb', (POLL_INTERVAL+10)*1000, nil, v2_api_ns)
+    http('/sync?'..data, nil, 'http_cb', (POLL_INTERVAL+10)*1000)
 end
 
 function MatrixServer:addRoom(room)
@@ -1247,8 +1247,8 @@ function MatrixServer:SendReadReceipt(room_id, event_id)
     http(url,
       {customrequest = 'POST'},
       'http_cb',
-      5*1000, nil,
-      v2_api_ns )
+      5*1000
+    )
 end
 
 function MatrixServer:Msg(room_id, body, msgtype, url)
