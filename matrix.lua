@@ -464,7 +464,7 @@ local function parse_http_statusline(line)
     if not httpversion then
         return
     end
-    return tonumber(httpversion), tonumber(status_code), reason_phrase
+    return httpversion, tonumber(status_code), reason_phrase
 end
 
 function real_http_cb(extra, command, rc, stdout, stderr)
