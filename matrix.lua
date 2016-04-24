@@ -41,7 +41,6 @@ This script maps this as follows:
  Fix parsing of multiple join messages
  Friendlier error message on bad user/password
  Parse some HTML and turn into color/bold/etc
- Handle m.room.canonical_alias
  Fix kick line generation, currently looks like the kicker left the room.
  Support weechat.look.prefix_same_nick
 
