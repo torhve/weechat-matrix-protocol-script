@@ -1916,7 +1916,7 @@ function Room:addNick(user_id, displayname)
     if not displayname
         or displayname == json.null
         or displayname == ''
-        or displayname:match'%s*' then
+        or displayname:match'%s+' then
         displayname = user_id:match('@(.*):.+')
     end
     if not self.users[user_id] then
