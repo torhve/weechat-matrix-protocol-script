@@ -2362,6 +2362,14 @@ function Room:ParseChunk(chunk, backlog, chunktype)
                 w.config_get_plugin('homeserver_url')
                 .. '_matrix/media/v1/download/')
             body = content['body'] .. ' ' .. url
+        elseif content['msgtype'] == 'm.file' then
+            local url = content['url'] or ''
+            url = url:gsub('mxc://',
+                w.config_get_plugin('homeserver_url')
+                .. '_matrix/media/v1/download/')
+            body = 'File upload: ' ..
+                   tostring(content['body'])
+                   .. ' ' .. url
         elseif content['msgtype'] == 'm.notice' then
             color = wcolor('irc.color.notice')
             body = content['body']
