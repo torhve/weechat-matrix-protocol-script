@@ -1916,7 +1916,7 @@ function Room:addNick(user_id, displayname)
     if not displayname
         or displayname == json.null
         or displayname == ''
-        or displayname:match'%s+' then
+        or displayname:match'^%s+$' then
         displayname = user_id:match('@(.*):.+')
     end
     if not self.users[user_id] then
@@ -2475,8 +2475,10 @@ function Room:ParseChunk(chunk, backlog, chunktype)
                         -- that we don't care about (or multiple joins)
                         return
                     end
-                    self:delNick(sender)
-                    self:addNick(sender, chunk.content.displayname)
+                    if not backlog then
+                        self:delNick(sender)
+                        self:addNick(sender, chunk.content.displayname)
+                    end
                 end
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
                 tag'irc_nick'
