@@ -2361,7 +2361,10 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             url = url:gsub('mxc://',
                 w.config_get_plugin('homeserver_url')
                 .. '_matrix/media/v1/download/')
-            body = content['body'] .. ' ' .. url
+            -- Synapse homeserver supports arbitrary file endings, so we put
+            -- filename at the end to make it nicer for URL "sniffers" to
+            -- realise it's a image URL
+            body = url .. '/' .. content.body
         elseif content['msgtype'] == 'm.file' then
             local url = content['url'] or ''
             url = url:gsub('mxc://',
