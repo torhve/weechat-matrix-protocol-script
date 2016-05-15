@@ -446,9 +446,12 @@ local function http(url, post, cb, timeout, extra, api_ns)
         post.header = 1 -- Request http headers in the response
     end
 
-    local homeserver_url = w.config_get_plugin('homeserver_url')
-    homeserver_url = homeserver_url .. api_ns
-    url = homeserver_url .. url
+    if not url:match'https?://' then
+        local homeserver_url = w.config_get_plugin('homeserver_url')
+        homeserver_url = homeserver_url .. api_ns
+        url = homeserver_url .. url
+    end
+
     if DEBUG then
         dbg{request={
             url=accesstoken_redact(url),
@@ -727,20 +730,23 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             -- We get join events, so we don't have to do anything
         elseif command:find'/publicRooms' then
             mprint 'Public rooms:'
-            mprint '\tName\tUsers\tTopic\tAliases'
+            mprint '\tUsers\tName\tTopic\tAliases'
+            table.sort(js.chunk, function(a, b)
+                return a.num_joined_members > b.num_joined_members
+            end)
             for _, r in ipairs(js.chunk) do
                 local name = ''
-                if r.name ~= json.null then
-                    name = r.name
+                if r.name and r.name ~= json.null then
+                    name = r.name:gsub('\n', '')
                 end
                 local topic = ''
-                if r.topic ~= json.null then
-                    topic = r.topic
+                if r.topic and r.topic ~= json.null then
+                    topic = r.topic:gsub('\n', '')
                 end
                 mprint(('%s %s %s %s')
                     :format(
-                        name or '',
                         r.num_joined_members or '',
+                        name or '',
                         topic or '',
                         table.concat(r.aliases or {}, ', ')))
             end
@@ -1575,9 +1581,14 @@ function MatrixServer:CreateRoomAlias(room_id, alias)
     })
 end
 
-function MatrixServer:ListRooms()
-    http(('/publicRooms?access_token=%s')
-        :format(urllib.quote(self.access_token)))
+function MatrixServer:ListRooms(arg)
+    local apipart = ('/publicRooms?access_token=%s'):format(urllib.quote(self.access_token))
+    if arg then
+        local url = 'https://' .. arg .. "/_matrix/client/r0"
+        http(url..apipart)
+    else
+        http(apipart)
+    end
 end
 
 function MatrixServer:Invite(room_id, user_id)
@@ -2924,7 +2935,8 @@ end
 function list_command_cb(data, current_buffer, args)
     local room = SERVER:findRoom(current_buffer)
     if room or current_buffer == BUFFER then
-        SERVER:ListRooms()
+        local _, target = split_args(args)
+        SERVER:ListRooms(target)
         return w.WEECHAT_RC_OK_EAT
     else
         return w.WEECHAT_RC_OK
