@@ -1,6 +1,6 @@
 -- libolm ffi wrapper for Lua(JIT)
 --[[
---Copyright 2015 Tor Hveem <tor@hveem.no>
+-- Copyright 2015-2016 Tor Hveem <tor@hveem.no>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -230,7 +230,9 @@ Account.new = function()
 end
 
 function Account:clear()
-    return olm.olm_clear_account(self.ptr)
+    local ret = olm.olm_clear_account(self.ptr)
+    self.strings = {}
+    return ret
 end
 
 function Account:last_error()
@@ -249,7 +251,7 @@ end
 function Account:create()
     local random_length = tonumber(olm.olm_create_account_random_length(self.ptr))
     local random = create_string(read_random(random_length), random_length)
-    local acccountdata = olm.olm_create_account(self.ptr, random, random_length)
+    olm.olm_create_account(self.ptr, random, random_length)
 end
 
 function Account:identity_keys()
@@ -259,9 +261,9 @@ function Account:identity_keys()
     end
     out_length = tonumber(out_length)
     local out_buffer = create_string_buffer(self, out_length)
-    local ret, err = self:errcheck(olm.olm_account_identity_keys(self.ptr, out_buffer, out_length))
-    if err then
-        return '', err
+    local _, ierr = self:errcheck(olm.olm_account_identity_keys(self.ptr, out_buffer, out_length))
+    if ierr then
+        return '', ierr
     end
     local identity_keys = ffi.string(out_buffer, out_length)
     return identity_keys
@@ -280,7 +282,7 @@ end
 function Account:one_time_keys()
     local out_length = tonumber(olm.olm_account_one_time_keys_length(self.ptr))
     local out_buffer = create_string_buffer(self, out_length)
-    local ret, err = olm.olm_account_one_time_keys(self.ptr, out_buffer, out_length)
+    local _, err = olm.olm_account_one_time_keys(self.ptr, out_buffer, out_length)
     if err then return '', err end
     local out = ffi.string(out_buffer, out_length)
     return out
@@ -298,7 +300,7 @@ function Account:pickle(key)
     local key_buffer = create_string_buffer(self, key)
     local pickle_length = tonumber(olm.olm_pickle_account_length(self.ptr))
     local pickle_buffer = create_string_buffer(self, pickle_length)
-    local ret, err = olm.olm_pickle_account(
+    local _, err = olm.olm_pickle_account(
         self.ptr, key_buffer, #key, pickle_buffer, pickle_length
     )
     if err then
@@ -405,8 +407,7 @@ function Session:session_id()
     local id_buffer = create_string_buffer(self, id_length)
     local ret, err = self:errcheck(olm.olm_session_id(self.ptr, id_buffer, id_length))
     if err then return ret, err end
-    local ret = ffi.string(id_buffer, id_length)
-    return ret
+    return ffi.string(id_buffer, id_length)
 end
 
 function Session:encrypt(plaintext)
@@ -430,19 +431,19 @@ function Session:encrypt(plaintext)
 end
 
 function Session:decrypt(message_type, message)
-    local message_buffer = create_string(message)
+    local maxlen_message_buffer = create_string(message)
     local max_plaintext_length, err = self:errcheck(olm.olm_decrypt_max_plaintext_length(
-        self.ptr, message_type, message_buffer, #message
+        self.ptr, message_type, maxlen_message_buffer, #message
     ))
     if err then return nil, err end
     max_plaintext_length = tonumber(max_plaintext_length)
     local plaintext_buffer = create_string_buffer(self, max_plaintext_length)
     local message_buffer = create_string(message)
-    local plaintext_length, err = self:errcheck(olm.olm_decrypt(
+    local plaintext_length, perr = self:errcheck(olm.olm_decrypt(
         self.ptr, message_type, message_buffer, #message,
         plaintext_buffer, max_plaintext_length
     ))
-    if err then return nil, err end
+    if perr then return nil, err end
     local plaintext = ffi.string(plaintext_buffer, tonumber(plaintext_length))
     return plaintext
 end
@@ -470,11 +471,15 @@ local test = arg and arg[1] and arg[1] == '--test'
 if test then
     local json = require'cjson'
     local key = 'test'
+    local err
+    local _
+    local alice
+    local bob
 
     alice = Account.new()
-    a_session = Session.new()
+    local a_session = Session.new()
     bob = Account.new()
-    b_session = Session.new()
+    local b_session = Session.new()
 
     alice:create()
 
@@ -485,21 +490,21 @@ if test then
     local a_keys = json.decode(alice:identity_keys())
 
     alice = Account.new()
-    local unpickle = alice:unpickle(key, pickle)
+    alice:unpickle(key, pickle)
     local a_keys_2 = json.decode(alice:identity_keys())
     assert(a_keys.curve25519 == a_keys_2.curve25519)
 
-    local unpickle, err = alice:unpickle('invalid key', pickle)
+    _, err = alice:unpickle('invalid key', pickle)
     assert(err, 'BAD_ACCOUNT_KEY')
 
-    local pickle = a_session:pickle(key)
-    local unpickle = a_session:unpickle(key, pickle)
+    pickle = a_session:pickle(key)
+    a_session:unpickle(key, pickle)
 
-    local unpickle, err = a_session:unpickle(key, 'invalid base64')
+    _, err = a_session:unpickle(key, 'invalid base64')
     assert(err, 'BAD_ACCOUNT_KEY')
-    local unpickle, err = a_session:unpickle('invalid key', pickle)
+    _, err = a_session:unpickle('invalid key', pickle)
     assert(err, 'BAD_ACCOUNT_KEY')
-    local unpickle, err = a_session:unpickle('invalid key', 'invalid bad64')
+    _, err = a_session:unpickle('invalid key', 'invalid bad64')
     assert(err, 'INVALID_BASE64')
 
     local sign_message = 'yepyepyep'
@@ -507,6 +512,7 @@ if test then
     print('signed', signed)
 
     bob:create()
+    -- luacheck: ignore
     local bobs_id_keys = json.decode(bob:identity_keys())
     bob:generate_one_time_keys(50)
     local bobs_id_keys = json.decode(bob:identity_keys())
@@ -540,8 +546,8 @@ if test then
     bob:clear()
     a_session:clear()
     b_session:clear()
-    print('Temp strings: '.. tostring(#strings))
-    strings = {}
+    --print('Temp strings: '.. tostring(#strings))
+    --strings = {}
 end
 
 return {
