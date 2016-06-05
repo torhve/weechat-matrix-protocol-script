@@ -233,7 +233,49 @@ size_t olm_outbound_group_session_key(
     OlmOutboundGroupSession *session,
     uint8_t * key, size_t key_length
 );
+typedef struct OlmInboundGroupSession OlmInboundGroupSession;
+size_t olm_inbound_group_session_size();
+OlmInboundGroupSession * olm_inbound_group_session(
+    void *memory
+);
+const char *olm_inbound_group_session_last_error(
+    const OlmInboundGroupSession *session
+);
+size_t olm_clear_inbound_group_session(
+    OlmInboundGroupSession *session
+);
+size_t olm_pickle_inbound_group_session_length(
+    const OlmInboundGroupSession *session
+);
+size_t olm_pickle_inbound_group_session(
+    OlmInboundGroupSession *session,
+    void const * key, size_t key_length,
+    void * pickled, size_t pickled_length
+);
+size_t olm_unpickle_inbound_group_session(
+    OlmInboundGroupSession *session,
+    void const * key, size_t key_length,
+    void * pickled, size_t pickled_length
+);
+size_t olm_init_inbound_group_session(
+    OlmInboundGroupSession *session,
+    uint32_t message_index,
+    uint8_t const * session_key, size_t session_key_length
+);
+size_t olm_group_decrypt_max_plaintext_length(
+    OlmInboundGroupSession *session,
+    uint8_t * message, size_t message_length
+);
+size_t olm_group_decrypt(
+    OlmInboundGroupSession *session,
 
+    /* input; note that it will be overwritten with the base64-decoded
+       message. */
+    uint8_t * message, size_t message_length,
+
+    /* output */
+    uint8_t * plaintext, size_t max_plaintext_length
+);
 
 ]]
 
@@ -613,7 +655,7 @@ function OutboundGroupSession:errcheck(val)
 end
 
 function OutboundGroupSession:last_error()
-    return ffi.string(olm.olm_session_last_error(self.ptr))
+    return ffi.string(olm.olm_outbound_group_session_last_error(self.ptr))
 end
 
 local InboundGroupSession = {}
@@ -623,24 +665,62 @@ InboundGroupSession.new = function()
     local session = {}
     setmetatable(session, InboundGroupSession)
     session.strings = {}
-    local buf = create_string_buffer(session, tonumber(olm.olm_outbound_group_session_size()))
-    session.ptr = olm.olm_session(buf)
-
-    local random_length = tonumber(olm.olm_create_account_random_length(self.ptr))
-    local random = create_string(read_random(random_length), random_length)
-    olm.olm_create_account(self.ptr, random, random_length)
+    local buf = create_string_buffer(session, tonumber(olm.olm_inbound_group_session_size()))
+    session.ptr = olm.olm_inbound_group_session(buf)
 
     return session
 end
 
-function InboundGroupSession:clear()
-    local ret, err = self:errcheck(olm.olm_clear_session(self.ptr))
+function InboundGroupSession:pickle(key)
+    local key_buffer = create_string_buffer(self, key)
+    local pickle_length = tonumber(olm.olm_pickle_inbound_group_session_length(self.ptr))
+    local pickle_buffer = create_string_buffer(self, pickle_length)
+    olm.olm_pickle_inbound_group_session(
+        self.ptr, key_buffer, len(key), pickle_buffer, pickle_length
+    )
+    return ffi.string(pickle_buffer, pickle_length)
+end
+
+function InboundGroupSession:unpickle(key, pickle)
+    local pickle_buffer = create_string(pickle, #pickle)
+    local ret = olm.olm_unpickle_inbound_group_session(
+        self.ptr, key, #key, pickle_buffer, #pickle
+    )
+    return self:errcheck(ret)
+end
+
+function InboundGroupSession:init(message_index, session_key)
+    local key_buffer = create_string_buffer(self, session_key)
+    return self:errcheck(olm.olm_init_inbound_group_session(self.ptr, message_index, key_buffer, #session_key))
+end
+
+function InboundGroupSession:decrypt(message)
+    local maxlen_message_buffer = create_string(message)
+    local max_plaintext_length, err = self:errcheck(olm.olm_group_decrypt_max_plaintext_length(
+        self.ptr, maxlen_message_buffer, #message
+    ))
     if err then return nil, err end
+    max_plaintext_length = tonumber(max_plaintext_length)
+    local plaintext_buffer = create_string_buffer(self, max_plaintext_length)
+    local message_buffer = create_string(message)
+    local plaintext_length, perr = self:errcheck(olm.olm_group_decrypt(
+        self.ptr, message_buffer, #message,
+        plaintext_buffer, max_plaintext_length
+    ))
+    if perr then return nil, err end
+    local plaintext = ffi.string(plaintext_buffer, tonumber(plaintext_length))
+    return plaintext
+end
+
+
+function InboundGroupSession:clear()
+    --local ret, err = self:errcheck(olm.olm_clear_session(self.ptr))
+    --if err then return nil, err end
     -- Save C string buffer to a table so the garbage collector does not clean
     -- the buffers before the olm library is done reading and writing to them
     -- TODO: check why this is needed
     self.strings = {}
-    return ret
+    --return ret
 end
 
 function InboundGroupSession:errcheck(val)
@@ -652,7 +732,7 @@ function InboundGroupSession:errcheck(val)
 end
 
 function InboundGroupSession:last_error()
-    return ffi.string(olm.olm_session_last_error(self.ptr))
+    return ffi.string(olm.olm_inbound_group_session_last_error(self.ptr))
 end
 
 -- Invoke program with --test to run tests
@@ -735,9 +815,15 @@ if test then
     local g_session = OutboundGroupSession.new()
     local pickle = g_session:pickle(key)
     local _ = g_session:unpickle(key, pickle)
+    local message_index = g_session:message_index()
+    local session_key = g_session:session_key()
     print('Group session id:', g_session:session_id())
     print('Group session index:', g_session:message_index())
     print('Group session key:', g_session:session_key())
+
+    local i_session = InboundGroupSession.new()
+    i_session:init(message_index, session_key)
+    print('Group decrypt', assert(secret_message == i_session:decrypt(g_session:encrypt(secret_message))))
 
 
     alice:clear()
@@ -745,6 +831,7 @@ if test then
     a_session:clear()
     b_session:clear()
     g_session:clear()
+    i_session:clear()
     --print('Temp strings: '.. tostring(#strings))
     --strings = {}
 end
