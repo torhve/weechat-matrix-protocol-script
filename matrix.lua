@@ -2433,7 +2433,11 @@ function Room:ParseChunk(chunk, backlog, chunktype)
           and (
               w.config_get_plugin('local_echo') == 'on'
               or was_decrypted -- local echo for encrypted messages
-            ) then
+            )
+          and (-- we don't generate local echo for files and images
+              content.msgtype == 'm.text'
+          )
+          then
             -- We have already locally echoed this line
             return
         end
