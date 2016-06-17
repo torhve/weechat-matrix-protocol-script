@@ -30,7 +30,6 @@ This script maps this as follows:
  TODO
  ----
  /ban
- /upload
  Giving people arbitrary power levels
  Lazyload messages instead of HUGE initialSync
  Dynamically fetch more messages in backlog when user reaches the
@@ -2376,7 +2375,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             -- filename at the end to make it nicer for URL "sniffers" to
             -- realise it's a image URL
             body = url .. '/' .. content.body
-        elseif content['msgtype'] == 'm.file' then
+        elseif content.msgtype == 'm.file' or content.msgtype == 'm.video' then
             local url = content['url'] or ''
             url = url:gsub('mxc://',
                 w.config_get_plugin('homeserver_url')
