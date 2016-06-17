@@ -723,6 +723,15 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         elseif command:find'/send/' then
             -- XXX Errorhandling
             -- TODO save event id to use for localecho
+            local event_id = js.event_id
+            local room_id = extra
+            -- When using relay client, WeeChat doesn't get any buffer_switch
+            -- signals, and thus cannot know when the relay client reads any
+            -- messages. https://github.com/weechat/weechat/issues/180
+            -- As a better than nothing approach we send read receipt when
+            -- user sends a message, since most likely the user has read
+            -- messages in that room if sending messages to it.
+            SERVER:SendReadReceipt(room_id, event_id)
         elseif command:find'createRoom' then
             -- We get join events, so we don't have to do anything
         elseif command:find'/publicRooms' then
@@ -1467,7 +1476,10 @@ function send(cbdata, calls)
               get_next_transaction_id(),
               urllib.quote(SERVER.access_token)
             ),
-            data
+            data,
+            nil,
+            nil,
+            id -- send room id to extra
         )
     end
 end
