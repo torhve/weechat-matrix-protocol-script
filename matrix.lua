@@ -36,11 +36,9 @@ This script maps this as follows:
  oldest message using pgup
  Need a way to change room join rule
  Fix broken state after failed initial connect
- Fix parsing of kick messages
  Fix parsing of multiple join messages
  Friendlier error message on bad user/password
  Parse some HTML and turn into color/bold/etc
- Fix kick line generation, currently looks like the kicker left the room.
  Support weechat.look.prefix_same_nick
 
 ]]
@@ -2367,7 +2365,10 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             -- content.format = 'org.matrix.custom.html'
             -- fontent.formatted_body...
         elseif content['msgtype'] == 'm.image' then
-            local url = content['url'] or ''
+            local url = content['url']
+            if type(url) ~= 'string' then
+                url = ''
+            end
             url = url:gsub('mxc://',
                 w.config_get_plugin('homeserver_url')
                 .. '_matrix/media/v1/download/')
@@ -2528,22 +2529,40 @@ function Room:ParseChunk(chunk, backlog, chunktype)
         elseif chunk['content']['membership'] == 'leave' then
             self:delNick(chunk.state_key)
             if chunktype == 'messages' then
-                local nick = sender
+                local nick = self.users[chunk.state_key]
                 local prev = chunk.unsigned.prev_content
                 if (prev and
                         prev.displayname and
                         prev.displayname ~= json.null) then
                     nick = prev.displayname
                 end
-                tag{"irc_quit","irc_smart_filter"}
-                local data = ('%s%s\t%s%s%s left the room.'):format(
-                    wcolor('weechat.color.chat_prefix_quit'),
-                    wconf('weechat.look.prefix_quit'),
-                    w.info_get('irc_nick_color', nick),
-                    nick,
-                    wcolor('irc.color.message_quit')
-                )
-                w.print_date_tags(self.buffer, time_int, tags(), data)
+                if sender ~= chunk.state_key then -- Kick
+                    tag{"irc_quit","irc_kick","irc_smart_filter"}
+                    local reason = chunk.content.reason
+                    local sender_nick = self.users[chunk.sender]
+                    local data = ('%s%s\t%s%s%s has kicked %s%s%s (%s).'):format(
+                        wcolor('weechat.color.chat_prefix_quit'),
+                        wconf('weechat.look.prefix_quit'),
+                        w.info_get('irc_nick_color', sender_nick),
+                        sender_nick,
+                        wcolor('irc.color.message_quit'),
+                        w.info_get('irc_nick_color', nick),
+                        nick,
+                        default_color,
+                        reason
+                    )
+                    w.print_date_tags(self.buffer, time_int, tags(), data)
+                else
+                    tag{"irc_quit","irc_smart_filter"}
+                    local data = ('%s%s\t%s%s%s left the room.'):format(
+                        wcolor('weechat.color.chat_prefix_quit'),
+                        wconf('weechat.look.prefix_quit'),
+                        w.info_get('irc_nick_color', nick),
+                        nick,
+                        wcolor('irc.color.message_quit')
+                    )
+                    w.print_date_tags(self.buffer, time_int, tags(), data)
+                end
             end
         elseif chunk['content']['membership'] == 'invite' then
             -- Check if we were the one being invited
