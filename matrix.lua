@@ -1134,11 +1134,11 @@ function MatrixServer:connect()
 end
 
 function MatrixServer:initial_sync()
-    BUFFER = w.buffer_new("matrix", "", "", "closed_matrix_buffer_cb", "")
-    w.buffer_set(BUFFER, "short_name", "matrix")
-    w.buffer_set(BUFFER, "name", "matrix")
+    BUFFER = w.buffer_new(SCRIPT_NAME, "", "", "closed_matrix_buffer_cb", "")
+    w.buffer_set(BUFFER, "short_name", SCRIPT_NAME)
+    w.buffer_set(BUFFER, "name", SCRIPT_NAME)
     w.buffer_set(BUFFER, "localvar_set_type", "server")
-    w.buffer_set(BUFFER, "localvar_set_server", "matrix")
+    w.buffer_set(BUFFER, "localvar_set_server", SCRIPT_NAME)
     w.buffer_set(BUFFER, "title", ("Matrix: %s"):format(
         w.config_get_plugin'homeserver_url'))
     if w.config_string(w.config_get('irc.look.server_buffer')) == 'merge_with_core' then
@@ -2388,7 +2388,8 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             -- filename at the end to make it nicer for URL "sniffers" to
             -- realise it's a image URL
             body = url .. '/' .. content.body
-        elseif content.msgtype == 'm.file' or content.msgtype == 'm.video' then
+        elseif content.msgtype == 'm.file' or content.msgtype == 'm.video' or
+            content.msgtype == 'm.audio' then
             local url = content['url'] or ''
             url = url:gsub('mxc://',
                 w.config_get_plugin('homeserver_url')
@@ -3348,7 +3349,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
 
     if WEECHAT_VERSION < 0x01040000 then
        perr(SCRIPT_NAME .. ': Please upgrade your WeeChat before using this script. Using this script on older WeeChat versions may lead to crashes. Many bugs have been fixed in newer versions of WeeChat.')
-       perr(SCRIPT_NAME .. ': Refusing to automatically connect you. If you insist, type /matrix connect, and do not act surprised if it crashes :-)')
+       perr(SCRIPT_NAME .. ': Refusing to automatically connect you. If you insist, type /'..SCRIPT_COMMAND..' connect, and do not act surprised if it crashes :-)')
     else
         SERVER:connect()
     end
