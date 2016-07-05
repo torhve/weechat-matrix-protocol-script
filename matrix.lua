@@ -2542,7 +2542,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
         elseif chunk['content']['membership'] == 'leave' then
             self:delNick(chunk.state_key)
             if chunktype == 'messages' then
-                local nick = self.users[chunk.state_key]
+                local nick = self.users[chunk.state_key] or sender
                 local prev = chunk.unsigned.prev_content
                 if (prev and
                         prev.displayname and
