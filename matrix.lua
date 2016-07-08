@@ -578,6 +578,14 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                                 end
                             end
                         end
+                        -- First of all parse invite states.
+                        local inv_states = room.invite_state
+                        if inv_states then
+                            local chunks = room.invite_state.events or {}
+                            for _, chunk in ipairs(chunks) do
+                                myroom:ParseChunk(chunk, backlog, 'states')
+                            end
+                        end
                         -- Parse states before messages so we can add nicks and stuff
                         -- before messages start appearing
                         local states = room.state
@@ -1191,7 +1199,7 @@ function MatrixServer:getMessages(room_id, dir, from, limit)
         :format(urllib.quote(room_id), data), nil, nil, nil, room_id)
 end
 
-function MatrixServer:join(room)
+function MatrixServer:Join(room)
     if not self.connected then
         --XXX'''
         return
@@ -1659,39 +1667,6 @@ Room.create = function(obj)
     room.aliases = nil -- aliases
     room.canonical_alias = nil
 
-    -- Might be invited to room, check invite state
-    local invite_state = obj.invite_state or {}
-    for _, event in ipairs(invite_state.events or {}) do
-        if event['type'] == 'm.room.name' then
-            room.name = event.content.name
-            room.roomname = event.content.name
-        elseif event['type'] == 'm.room.join_rule' then
-            room.join_rule = event.content.join_rule
-        elseif event['type'] == 'm.room.member' then
-            if event.state_key == SERVER.user_id then
-                room.membership = 'invite'
-                room.inviter = event.sender
-                if w.config_get_plugin('autojoin_on_invite') == 'on' then
-                    SERVER:join(room.identifier)
-                else
-                    mprint(('You have been invited to join room %s by %s. Type /join %s to join.'):format(room.name or room.identifier, obj.inviter, room.identifier))
-                end
-            else
-                if event.content and event.content.displayname then
-                    room.users[event.sender] = event.content.displayname
-                end
-                if not room.name or not room.roomname then
-                    room.name = room.users[room.inviter] or room.inviter
-                    room.roomname = room.users[room.inviter] or room.inviter
-                end
-            end
-        else
-            if DEBUG then
-                dbg{err='Unhandled invite_state event',event=event}
-            end
-        end
-    end
-
     -- We might not be a member yet
     local state_events = obj.state or {}
     for _, state in ipairs(state_events) do
@@ -1713,7 +1688,6 @@ Room.create = function(obj)
     if not obj['visibility'] then
         room.visibility = 'public'
     end
-
 
     return room
 end
@@ -2493,7 +2467,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             -- Check if the chunk has prev_content or not
             -- if there is prev_content there wasn't a join but a nick change
             -- or duplicate join
-            local prev_content = chunk.unsigned.prev_content
+            local prev_content = chunk.unsigned and chunk.unsigned.prev_content
             if prev_content
                     and prev_content.membership == 'join'
                     and chunktype == 'messages' then
@@ -2579,13 +2553,13 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             self:delNick(chunk.state_key)
         elseif chunk['content']['membership'] == 'invite' then
             -- Check if we were the one being invited
-            if chunk.state_key == SERVER.user_id and
-                  (not backlog and chunktype=='messages') then
-                self:addNick(sender)
+            if chunk.state_key == SERVER.user_id and (
+                  (not backlog and chunktype == 'messages') or
+                  chunktype == 'states') then
+                --self:addNick(sender)
                 if w.config_get_plugin('autojoin_on_invite') == 'on' then
-                    SERVER:join(self.identifier)
-                    mprint(('%s invited you'):format(
-                        sender))
+                    SERVER:Join(self.identifier)
+                    mprint(('%s invited you'):format(sender))
                 else
                     mprint(('You have been invited to join room %s by %s. Type /join %s to join.')
                         :format(
@@ -2850,9 +2824,9 @@ function join_command_cb(data, current_buffer, args)
         local _, alias = split_args(args)
         if not alias then
             -- To support running /join on a invited room without args
-            SERVER:join(room.identifier)
+            SERVER:Join(room.identifier)
         else
-            SERVER:join(alias)
+            SERVER:Join(alias)
         end
         return w.WEECHAT_RC_OK_EAT
     else
