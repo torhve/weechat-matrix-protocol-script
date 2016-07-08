@@ -561,7 +561,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             end
             for membership, rooms in pairs(js['rooms']) do
                 -- If we left the room, simply ignore it
-                if membership ~= 'leave' then
+                if membership ~= 'leave' or (membership == 'leave' and (not backlog)) then
                     for identifier, room in pairs(rooms) do
                         -- Monkey patch it to look like v1 object
                         room.room_id = identifier
@@ -2540,7 +2540,6 @@ function Room:ParseChunk(chunk, backlog, chunktype)
                 end
             end
         elseif chunk['content']['membership'] == 'leave' then
-            self:delNick(chunk.state_key)
             if chunktype == 'messages' then
                 local nick = self.users[chunk.state_key] or sender
                 local prev = chunk.unsigned.prev_content
@@ -2577,6 +2576,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
                     w.print_date_tags(self.buffer, time_int, tags(), data)
                 end
             end
+            self:delNick(chunk.state_key)
         elseif chunk['content']['membership'] == 'invite' then
             -- Check if we were the one being invited
             if chunk.state_key == SERVER.user_id and
