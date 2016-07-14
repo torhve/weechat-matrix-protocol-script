@@ -544,7 +544,7 @@ function Session:decrypt(message_type, message)
         self.ptr, message_type, message_buffer, #message,
         plaintext_buffer, max_plaintext_length
     ))
-    if perr then return nil, err end
+    if perr then return nil, perr end
     local plaintext = ffi.string(plaintext_buffer, tonumber(plaintext_length))
     return plaintext
 end
@@ -811,6 +811,7 @@ if test then
         Account.new():clear()
     end
 
+    print('*** GROUP TESTS *** ')
 
     local g_session = OutboundGroupSession.new()
     local pickle = g_session:pickle(key)
@@ -834,6 +835,40 @@ if test then
     i_session:clear()
     --print('Temp strings: '.. tostring(#strings))
     --strings = {}
+end
+local test2 = arg and arg[1] and arg[1] == '--decrypt'
+if test2 then
+    local body = ''
+    local alice
+    local bob
+    local OLM_KEY = ''
+    local json = require'cjson'
+
+    local fread = function(fname)
+     local fd = io.open(fname, 'r')
+     local data = fd:read('*a')
+     fd:close()
+     return data
+    end
+
+    alice = Account.new()
+    --print(json.encode(arg))
+    alice:unpickle(OLM_KEY, fread(arg[2]))
+
+    local sessions = json.decode(fread(arg[3]))
+    for id, pickle in pairs(sessions) do
+        local session = Session.new()
+        session:unpickle(OLM_KEY, pickle)
+        print('matches', session:matches_inbound(body))
+        local matches = session:matches_inbound(body)
+        if matches then
+            local cleartext, err = session:decrypt(0, body)
+            print(session:decrypt(0, body))
+        end
+    end
+    --bob = Account.new()
+    --local b_session = Session.new()
+
 end
 
 return {
