@@ -2524,7 +2524,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
                 end
                 if sender ~= chunk.state_key then -- Kick
                     tag{"irc_quit","irc_kick","irc_smart_filter"}
-                    local reason = chunk.content.reason
+                    local reason = chunk.content.reason or ''
                     local sender_nick = self.users[chunk.sender]
                     local data = ('%s%s\t%s%s%s has kicked %s%s%s (%s).'):format(
                         wcolor('weechat.color.chat_prefix_quit'),
