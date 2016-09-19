@@ -1,14 +1,22 @@
 #!/bin/bash
 # Just a simple script to push an updated copy of the matrix.lua script
 # to the .weechat/lua folder after each update.
-file="~/.weechat/lua/autoload/matrix.lua"
+file="$HOME/.weechat/lua/matrix.lua"
+link="$HOME/.weechat/lua/autoload/matrix.lua"
+
 echo "Updating, please wait a moment..."
 git pull
-cp matrix.lua ~/.weechat/lua
-ln -s ~/.weechat/lua/matrix.lua ~/.weechat/lua/autoload/matrix.lua
-if [ -f "$file" ]
-  then
-  ln -s ~/.weechat/lua/matrix.lua ~/.weechat/lua/autoload/matrix.lua
-  else
-  echo "$file already exists, skipping symbolic link creation."
+
+# copy in the updated matrix.lua
+echo "Updating $file."
+cp matrix.lua $HOME/.weechat/lua
+
+# create the symlink if necessary
+if [ -h $link ]
+then
+	echo "$link already exists, skipping symbolic link creation."
+else
+	echo "Creating symbolic link in autoload directory."
+	ln -s $file $link
 fi
+echo "Done."
