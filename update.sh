@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Just a simple script to push an updated copy of the matrix.lua script
 # to the .weechat/lua folder after each update.
 file="$HOME/.weechat/lua/matrix.lua"
