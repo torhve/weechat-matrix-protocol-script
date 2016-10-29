@@ -1681,7 +1681,7 @@ Room.create = function(obj)
         room.name = room.identifier
     end
     if not room.server then
-        room.server = ''
+        room.server = 'matrix'
     end
 
     room.visibility = obj.visibility
@@ -1697,11 +1697,11 @@ function Room:SetName(name)
         return
     end
     -- override hierarchy
-    if self.roomname then
+    if self.roomname and self.roomname ~= '' then
         name = self.roomname
     elseif self.canonical_alias then
         name = self.canonical_alias
-        local short_name, _ = self.canonical_alias:match('(.+):(.+)')
+        local short_name, _ = self.canonical_alias:match('^(.-):(.+)$')
         if short_name then
             name = short_name
         end
@@ -1732,6 +1732,7 @@ function Room:SetName(name)
     if buffer_name == name then
         return
     end
+
 
     w.buffer_set(self.buffer, "short_name", name)
     w.buffer_set(self.buffer, "name", name)
