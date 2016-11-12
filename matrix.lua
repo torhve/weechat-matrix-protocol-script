@@ -1992,7 +1992,7 @@ function Room:GetNickGroup(user_id)
 end
 
 function Room:GetPowerLevel(user_id)
-    return self.power_levels.users[user_id] or self.power_levels.users_default or 0
+    return tonumber(self.power_levels.users[user_id] or self.power_levels.users_default or 0)
 end
 
 function Room:ClearTyping()
@@ -2605,16 +2605,18 @@ function Room:ParseChunk(chunk, backlog, chunktype)
     elseif chunk['type'] == 'm.room.create' then
         self.creator = chunk.content.creator
     elseif chunk['type'] == 'm.room.power_levels' then
-        for user_id, lvl in pairs(chunk.content.users) do
-            -- TODO
-            -- calculate changes here and generate message lines
-            -- describing the change
-        end
-        self.power_levels = chunk.content
-        for user_id, lvl in pairs(self.power_levels.users) do
-            local _, nprefix, nprefix_color = self:GetNickGroup(user_id)
-            self:UpdateNick(user_id, 'prefix', nprefix)
-            self:UpdateNick(user_id, 'prefix_color', nprefix_color)
+        if chunk.content.users then
+            self.power_levels = chunk.content
+            for user_id, lvl in pairs(self.power_levels.users) do
+                -- TODO
+                -- calculate changes here and generate message lines
+                -- describing the change
+            end
+            for user_id, lvl in pairs(self.power_levels.users) do
+                local _, nprefix, nprefix_color = self:GetNickGroup(user_id)
+                self:UpdateNick(user_id, 'prefix', nprefix)
+                self:UpdateNick(user_id, 'prefix_color', nprefix_color)
+            end
         end
     elseif chunk['type'] == 'm.room.join_rules' then
         -- TODO: parse join_rules events --
