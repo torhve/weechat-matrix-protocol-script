@@ -1162,6 +1162,9 @@ function MatrixServer:initial_sync()
                 timeline = {
                     limit = tonumber(w.config_get_plugin('backlog_lines'))
                 }
+            },
+            presence = {
+                not_types = {'*'}, -- dont want presence
             }
         })
     })
@@ -1234,10 +1237,24 @@ function MatrixServer:poll()
     end
     self.poll_lock = true
     self.polltime = os.time()
+    local filter = {}
+    if w.config_get_plugin('presence_filter') == 'on' then
+        filter = { -- timeline filter
+            presence = {
+                not_types = {'*'}, -- dont want presence
+            },
+            room = {
+                ephemeral = {
+                    not_types = {'*'}, -- dont want read receipt and typing notices
+                }
+            }
+        }
+    end
     local data = urllib.urlencode({
         access_token = self.access_token,
         timeout = 1000*POLL_INTERVAL,
         full_state = 'false',
+        filter = json.encode(filter),
         since = self.end_token
     })
     http('/sync?'..data, nil, 'http_cb', (POLL_INTERVAL+10)*1000)
@@ -3270,6 +3287,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         user= {'', 'Your homeserver username'},
         password= {'', 'Your homeserver password'},
         backlog_lines= {'120', 'Number of lines to fetch from backlog upon connecting'},
+        presence_filter = {'off', 'Filter presence messages and ephemeral events (for performance)'},
         autojoin_on_invite = {'on', 'Automatically join rooms you are invited to'},
         typing_notices = {'on', 'Send typing notices when you type'},
         local_echo = {'on', 'Print lines locally instead of waiting for return from server'},
