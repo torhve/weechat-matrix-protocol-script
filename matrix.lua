@@ -1088,7 +1088,9 @@ MatrixServer.create = function()
      server.presence = {}
      server.end_token = 'END'
      server.typing_time = os.time()
-     server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
+     if w.config_get_plugin('presence_filter') ~= 'on' then
+         server.typingtimer = w.hook_timer(10*1000, 0, 0, "cleartyping", "")
+     end
 
      -- Use a lock to prevent multiple simul poll with same end token, which
      -- could lead to duplicate messages
