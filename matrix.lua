@@ -1655,6 +1655,7 @@ end
 function buffer_input_cb(b, buffer, data)
     for r_id, room in pairs(SERVER.rooms) do
         if buffer == room.buffer then
+            data = data:gsub('^//', '/')
             SERVER:Msg(r_id, data)
             break
         end
