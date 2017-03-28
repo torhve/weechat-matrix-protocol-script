@@ -1,6 +1,6 @@
 # Matrix Client script for WeeChat
 
-This script is considered beta quality as not all functionality is in place and still has known bugs, and unknown bugs to be discovered and fixed.
+Also known as WeeMatrix, this script is considered beta quality as not all functionality is in place and still has known bugs, and unknown bugs to be discovered and fixed.
 
 ## What is Matrix ?
 
