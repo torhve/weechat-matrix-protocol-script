@@ -12,12 +12,11 @@ Matrix is a new open source realtime federated chat protocol. You can read more 
 
 ## What does it look like?
 
-
 > WeeChat in a terminal
 
 ![weechat ncurses cli screenshot](https://hveem.no/ss/weechat-matrix-ss.png)
 
-> WeeChat in a relay client [http://github.com/glowing-bear](Glowing Bear)
+> WeeChat in a relay client [Glowing Bear](http://github.com/glowing-bear)
 
 ![weechat glowing bear](https://hveem.no/ss/weechat-matrix-gb.png)
 
