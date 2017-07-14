@@ -1,6 +1,6 @@
 -- WeeChat Matrix.org Client
 -- vim: expandtab:ts=4:sw=4:sts=4
--- luacheck: globals weechat command_help command_connect matrix_command_cb matrix_away_command_run_cb configuration_changed_cb real_http_cb matrix_unload http_cb upload_cb send buffer_input_cb poll polltimer_cb cleartyping otktimer_cb join_command_cb part_command_cb leave_command_cb me_command_cb topic_command_cb upload_command_cb query_command_cb create_command_cb createalias_command_cb invite_command_cb list_command_cb op_command_cb voice_command_cb devoice_command_cb kick_command_cb deop_command_cb nick_command_cb whois_command_cb notice_command_cb msg_command_cb encrypt_command_cb public_command_cb names_command_cb more_command_cb roominfo_command_cb name_command_cb closed_matrix_buffer_cb closed_matrix_room_cb typing_notification_cb buffer_switch_cb typing_bar_item_cb
+-- luacheck: globals weechat command_help command_connect matrix_command_cb matrix_away_command_run_cb configuration_changed_cb real_http_cb matrix_unload http_cb upload_cb send buffer_input_cb poll polltimer_cb cleartyping otktimer_cb join_command_cb part_command_cb leave_command_cb me_command_cb topic_command_cb upload_command_cb query_command_cb create_command_cb createalias_command_cb invite_command_cb list_command_cb op_command_cb voice_command_cb devoice_command_cbtow.config_get_plugin('timeout')) kick_command_cb deop_command_cb nick_command_cb whois_command_cb notice_command_cb msg_command_cb encrypt_command_cb public_command_cb names_command_cb more_command_cb roominfo_command_cb name_command_cb closed_matrix_buffer_cb closed_matrix_room_cb typing_notification_cb buffer_switch_cb typing_bar_item_cb
 
 --[[
  Author: xt <xt@xt.gg>
@@ -68,6 +68,10 @@ local DEBUG = false
 -- happens before it will return sooner.
 -- default Nginx proxy timeout is 60s, so we go slightly lower
 local POLL_INTERVAL = 55
+
+-- Time in seconds until a connection is assumed to be timed out.
+-- Floating values like 0.4 should work too.
+local timeout = tonumber(w.config_get_plugin('timeout'))*1000
 
 local default_color = w.color('default')
 -- Cache error variables so we don't have to look them up for every error
@@ -896,7 +900,7 @@ function Olm:query(user_ids) -- Query keys from other user_id
     http('/keys/query/?'..auth,
         {postfields=json.encode(data)},
         'http_cb',
-        5*1000, nil,
+        timeout, nil,
         v2_api_ns
     )
 end
@@ -905,7 +909,7 @@ function Olm:check_server_keycount()
     local data = urllib.urlencode{access_token=SERVER.access_token}
     http('/keys/upload/'..self.device_id..'?'..data,
         {},
-        'http_cb', 5*1000, nil, v2_api_ns
+        'http_cb', timeout, nil, v2_api_ns
     )
 end
 
@@ -967,7 +971,7 @@ function Olm:upload_keys()
     }
     http('/keys/upload/'..self.device_id..'?'..data, {
         postfields = json.encode(msg)
-    }, 'http_cb', 5*1000, nil, v2_api_ns)
+    }, 'http_cb', timeout, nil, v2_api_ns)
 
     self.account:mark_keys_as_published()
 
@@ -988,7 +992,7 @@ function Olm:claim(user_id, device_id) -- Fetch one time keys
     }
     http('/keys/claim?'..auth,
         {postfields=json.encode(data)},
-        'http_cb', 30*1000, nil, v2_api_ns
+        'http_cb', timeout, nil, v2_api_ns
     )
 end
 
@@ -1139,7 +1143,7 @@ function MatrixServer:connect()
         }
         http('/login', {
             postfields = json.encode(post)
-        }, 'http_cb', 5*1000) -- Set a short timeout so user can get more immidiate feedback
+        }, 'http_cb', timeout)
     end
 end
 
@@ -1227,7 +1231,7 @@ function MatrixServer:part(room)
         access_token= self.access_token,
     })
     http(('/rooms/%s/leave?%s'):format(id, data), {postfields = "{}"},
-        'http_cb', 10000, room.identifier)
+        'http_cb', timeout, room.identifier)
 end
 
 function MatrixServer:poll()
@@ -1294,7 +1298,7 @@ function MatrixServer:SendReadReceipt(room_id, event_id)
     http(url,
       {customrequest = 'POST'},
       'http_cb',
-      5*1000
+      timeout
     )
 end
 
@@ -3297,6 +3301,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         debug = {'off', 'Print a lot of extra information to help with finding bugs and other problems.'},
         encrypted_message_color = {'lightgreen', 'Print encrypted mesages with this color'},
         --olm_secret = {'', 'Password used to secure olm stores'},
+        timeout = {'5', 'Time in seconds until a connection is assumed to be timed out'},
     }
     -- set default settings
     for option, value in pairs(settings) do
