@@ -1135,7 +1135,8 @@ function MatrixServer:connect()
         local post = {
             ["type"]="m.login.password",
             ["user"]=user,
-            ["password"]=password
+            ["password"]=password,
+            ['initial_device_display_name']='WeeMatrix'
         }
         http('/login', {
             postfields = json.encode(post)
