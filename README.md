@@ -127,23 +127,9 @@ export LUA_CPATH="/opt/local/share/luarocks/lib/lua/5.3/?.so;$LUA_CPATH"
 
 # Encryption
 
-Encryption support is work in progress, but the brave souls that can handle some nonstraighfoward installation and can live with potentially crashing WeeChats and other problems can try to follow the instructions below to get end-to-end encryption working.
+The current encryption implementation in weechat-matrix-protocol is incompatible with Matrix. It was written for an early proof-of-concept version of the protocol that used Olm, and does not work with the current Matrix protocol which utilises Megolm.
 
-`matrix.lua` uses [olm](https://matrix.org/git/olm/) C library to do encryption. That library needs to be downloaded, compiled and installed in a place Lua can find it.
-The Lua binding is written using FFI, which means you *either* have to compile WeeChat against LuaJIT (which is not the standard!) or you will have to install FFI for regular Lua.
-[LuaFFI](https://github.com/jmckaskill/luaffi) can be found [here](https://github.com/jmckaskill/luaffi). It needs to be downloaded, compiled and installed in a place Lua can find it.
-If you decide to recompile WeeChat instead, the `cmake` incantation you need is `cmake ..  -DCMAKE_BUILD_TYPE=Debug -DLUA_INCLUDE_DIRS=/usr/include/luajit-2.0 -DLUA_LDFLAGS=/usr/lib/x86_64-linux-gnu/libluajit-5.1.so`
-
-When this is in place, you need to place `olm.lua` binding a place where WeeChat can find it, the easiest approach is probably current working directory.
-
-Whether encryption loads OK or not it should print a message in weechat core buffer when you load matrix script to tell you if it could be loaded OK or not.
-If encryption is loaded, and your matrix homeserver supports encryption it will upload keys upon connection.
-
-To enable encryption for outgoing messages in a room type */encrypt on* with a room as active current buffer and it will download the keys of the other users in the room and encrypt using those.
-
-If you're having problems, you can try command `/matrix debug` or `/set plugins.var.lua.matrix.debug on` to get a lot of extra messages in your matrix buffer.
-
-Encrypted messages will be printed in color lightgreen to tell you the user that is an encrypted message. This can be configured with option `/set plugins.var.lua.matrix.debug encrypted_message_color`
+Help appreciated to get it working!
 
 # License
 
