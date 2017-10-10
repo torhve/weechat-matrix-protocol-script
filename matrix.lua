@@ -775,7 +775,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             -- Return of SendPresence which we don't have to handle because
             -- it will be sent back to us as an event
         else
-            dbg{['error'] = {msg='Unknown command in http cb', command=command,
+            dbg{['error'] = {msg='Unknown command in http cb', command=accesstoken_redact(command),
                 js=js}}
         end
     end
