@@ -2690,7 +2690,8 @@ function Room:ParseChunk(chunk, backlog, chunktype)
     -- luacheck: ignore 542
     elseif chunk['type'] == 'm.receipt' then
         -- TODO: figure out if we can do something sensible with read receipts
-    elseif chunk['type'] == 'm.fully_read' then
+    elseif chunk['type'] == 'm.fully_read' and self.buffer ~= w.current_buffer() then
+        -- we don't want to update read line for the current buffer
         -- TODO: check if read marker correspond to the last event in the room
         w.buffer_set(self.buffer, "unread", "")
     else
