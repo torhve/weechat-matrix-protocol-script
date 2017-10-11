@@ -2694,6 +2694,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
         -- we don't want to update read line for the current buffer
         -- TODO: check if read marker correspond to the last event in the room
         w.buffer_set(self.buffer, "unread", "")
+        w.buffer_set(self.buffer, "hotlist", "-1")
     else
         if DEBUG then
             perr(('Unknown event type %s%s%s in room %s%s%s'):format(
