@@ -615,6 +615,14 @@ function real_http_cb(extra, command, rc, stdout, stderr)
                                 myroom:ParseChunk(chunk, backlog, 'states')
                             end
                         end
+                        local account_data = room.account_data
+                        if account_data then
+                            -- looks for m.fully_read event
+                            local chunks = account_data.events or {}
+                            for _, chunk in ipairs(chunks) do
+                                myroom:ParseChunk(chunk, backlog, 'account_data')
+                            end
+                        end
                         if backlog then
                             -- All the state should be done. Try to get a good name for the room now.
                             myroom:SetName(myroom.identifier)
@@ -739,7 +747,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             -- As a better than nothing approach we send read receipt when
             -- user sends a message, since most likely the user has read
             -- messages in that room if sending messages to it.
-            SERVER:SendReadReceipt(room_id, event_id)
+            SERVER:SendReadMarker(room_id, event_id)
         elseif command:find'createRoom' then
             -- We get join events, so we don't have to do anything
         elseif command:find'/publicRooms' then
@@ -768,6 +776,8 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         elseif command:find'/invite' then
         elseif command:find'receipt' then
             -- we don't care about receipts for now
+        elseif command:find'read_markers' then
+            -- we don't care about read markers for now
         elseif command:find'directory/room' then
             --- XXX: parse result
             mprint 'Created new alias for room'
@@ -1285,15 +1295,23 @@ function MatrixServer:delRoom(room_id)
     end
 end
 
-function MatrixServer:SendReadReceipt(room_id, event_id)
+function MatrixServer:SendReadMarker(room_id, event_id)
+    -- Send read marker and read receipt too.
+    -- Read receipt is a federated event, read marker is only visible by the
+    -- user to by used by clients.
+    --
     -- TODO: prevent sending multiple identical read receipts
-    local r_type = 'm.read'
     local auth = urllib.urlencode{access_token=self.access_token}
-    room_id = urllib.quote(room_id)
-    event_id = urllib.quote(event_id)
-    local url = '/rooms/'..room_id..'/receipt/'..r_type..'/'..event_id..'?'..auth
+    local url = '/rooms/'..room_id..'/read_markers?'..auth
+    local data = {
+        customrequest = 'POST',
+        postfields = {}
+    }
+    data.postfields['m.fully_read'] = event_id
+    data.postfields['m.read'] = event_id
+    data.postfields = json.encode(data.postfields)
     http(url,
-      {customrequest = 'POST'},
+      data,
       'http_cb',
       5*1000
     )
@@ -2673,6 +2691,11 @@ function Room:ParseChunk(chunk, backlog, chunktype)
     -- luacheck: ignore 542
     elseif chunk['type'] == 'm.receipt' then
         -- TODO: figure out if we can do something sensible with read receipts
+    elseif chunk['type'] == 'm.fully_read' and self.buffer ~= w.current_buffer() then
+        -- we don't want to update read line for the current buffer
+        -- TODO: check if read marker correspond to the last event in the room
+        w.buffer_set(self.buffer, "unread", "")
+        w.buffer_set(self.buffer, "hotlist", "-1")
     else
         if DEBUG then
             perr(('Unknown event type %s%s%s in room %s%s%s'):format(
@@ -2808,7 +2831,7 @@ function Room:MarkAsRead()
             local tag = w.hdata_string(hdata_line_data, data, i .. "|tags_array")
             -- Event ids are like $142533663810152bfUKc:matrix.org
             if tag:match'^%$.*:' then
-                SERVER:SendReadReceipt(self.identifier, tag)
+                SERVER:SendReadMarker(self.identifier, tag)
                 break
             end
         end
