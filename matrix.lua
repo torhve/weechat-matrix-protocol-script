@@ -475,7 +475,7 @@ function real_http_cb(extra, command, rc, stdout, stderr)
     end
 
     if stderr and stderr ~= '' then
-        mprint(('error: %s'):format(stderr))
+        mprint(('error: %s'):format(accesstoken_redact(stderr)))
         return w.WEECHAT_RC_OK
     end
 
