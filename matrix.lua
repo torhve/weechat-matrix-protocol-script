@@ -1,6 +1,6 @@
 -- WeeChat Matrix.org Client
 -- vim: expandtab:ts=4:sw=4:sts=4
--- luacheck: globals weechat command_help command_connect matrix_command_cb matrix_away_command_run_cb configuration_changed_cb real_http_cb matrix_unload http_cb upload_cb send buffer_input_cb poll polltimer_cb cleartyping otktimer_cb join_command_cb part_command_cb leave_command_cb me_command_cb topic_command_cb upload_command_cb query_command_cb create_command_cb createalias_command_cb invite_command_cb list_command_cb op_command_cb voice_command_cb devoice_command_cbtow.config_get_plugin('timeout')) kick_command_cb deop_command_cb nick_command_cb whois_command_cb notice_command_cb msg_command_cb encrypt_command_cb public_command_cb names_command_cb more_command_cb roominfo_command_cb name_command_cb closed_matrix_buffer_cb closed_matrix_room_cb typing_notification_cb buffer_switch_cb typing_bar_item_cb
+-- luacheck: globals weechat command_help command_connect matrix_command_cb matrix_away_command_run_cb configuration_changed_cb real_http_cb matrix_unload http_cb upload_cb send buffer_input_cb poll polltimer_cb cleartyping otktimer_cb join_command_cb part_command_cb leave_command_cb me_command_cb topic_command_cb upload_command_cb query_command_cb create_command_cb createalias_command_cb invite_command_cb list_command_cb op_command_cb voice_command_cb devoice_command_cbtow.config_get_plugin('timeout')) kick_command_cb deop_command_cb nick_command_cb whois_command_cb notice_command_cb msg_command_cb encrypt_command_cb public_command_cb names_command_cb more_command_cb roominfo_command_cb name_command_cb closed_matrix_buffer_cb closed_matrix_room_cb typing_notification_cb buffer_switch_cb typing_bar_item_cb devoice_command_cb
 
 --[[
  Author: xt <xt@xt.gg>
@@ -71,7 +71,7 @@ local POLL_INTERVAL = 55
 
 -- Time in seconds until a connection is assumed to be timed out.
 -- Floating values like 0.4 should work too.
-local timeout = tonumber(w.config_get_plugin('timeout'))*1000
+local timeout = 5*1000 -- overriden by w.config_get_plugin later
 
 local default_color = w.color('default')
 -- Cache error variables so we don't have to look them up for every error
@@ -422,15 +422,15 @@ function configuration_changed_cb(data, option, value)
     end
 end
 
-local function http(url, post, cb, timeout, extra, api_ns)
+local function http(url, post, cb, h_timeout, extra, api_ns)
     if not post then
         post = {}
     end
     if not cb then
         cb = 'http_cb'
     end
-    if not timeout then
-        timeout = 60*1000
+    if not h_timeout then
+        h_timeout = 60*1000
     end
     if not extra then
         extra = nil
@@ -459,7 +459,7 @@ local function http(url, post, cb, timeout, extra, api_ns)
             post=post,extra=extra}
         }
     end
-    w.hook_process_hashtable('url:' .. url, post, timeout, cb, extra)
+    w.hook_process_hashtable('url:' .. url, post, h_timeout, cb, extra)
 end
 
 local function parse_http_statusline(line)
@@ -3337,6 +3337,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
                      value[2], value[1]))
         end
     end
+    timeout = tonumber(w.config_get_plugin('timeout'))*1000
     errprefix = wconf'weechat.look.prefix_error'
     errprefix_c = wcolor'weechat.color.chat_prefix_error'
     HOMEDIR = w.info_get('weechat_dir', '') .. '/'
