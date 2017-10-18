@@ -3287,7 +3287,7 @@ function typing_notification_cb(signal, sig_type, data)
     return w.WEECHAT_RC_OK
 end
 
-function buffer_switch_cb(signal, sig_type, data)
+function buffer_switch_cb(data, signal, sig_type)
     -- Update bar item
     w.bar_item_update('matrix_typing_notice')
     local current_buffer = w.current_buffer()
