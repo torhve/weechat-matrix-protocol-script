@@ -1312,7 +1312,11 @@ function MatrixServer:SendReadMarker(room_id, event_id)
         postfields = {}
     }
     data.postfields['m.fully_read'] = event_id
-    data.postfields['m.read'] = event_id
+
+    if w.config_get_plugin('read_receipts') == 'on' then
+        data.postfields['m.read'] = event_id
+    end
+
     data.postfields = json.encode(data.postfields)
     http(url,
       data,
@@ -3326,6 +3330,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         encrypted_message_color = {'lightgreen', 'Print encrypted mesages with this color'},
         --olm_secret = {'', 'Password used to secure olm stores'},
         timeout = {'5', 'Time in seconds until a connection is assumed to be timed out'},
+        read_receipts = {'on', 'Send read receipts. Note that not sending them will prevent a room to be marked as read in Riot clients.'}
     }
     -- set default settings
     for option, value in pairs(settings) do
