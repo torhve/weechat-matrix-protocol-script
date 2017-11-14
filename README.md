@@ -125,6 +125,15 @@ export LUA_PATH="/opt/local/share/luarocks/share/lua/5.3/?.lua;/opt/local/share/
 export LUA_CPATH="/opt/local/share/luarocks/lib/lua/5.3/?.so;$LUA_CPATH"
 ```
 
+## How to get WeeChat & Lua deps up and running on Arch:
+```bash
+sudo pacman -S lua weechat
+# You can grab lua-cjson from either the AUR:
+pacaur -y lua-cjson
+# Or through the luarocks package manager:
+luarocks install lua-cjson
+```
+
 # Encryption
 
 The current encryption implementation in weechat-matrix-protocol is incompatible with Matrix. It was written for an early proof-of-concept version of the protocol that used Olm, and does not work with the current Matrix protocol which utilises Megolm.
