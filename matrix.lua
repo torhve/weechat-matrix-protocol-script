@@ -2180,7 +2180,15 @@ end
 function Room:formatNick(user_id)
     -- Turns a nick name into a weechat-styled nickname. This means giving
     -- it colors, and proper prefix and suffix
-    local nick = self.users[user_id]
+    local nick
+    if w.config_get_plugin('nick_style') == 'uid' then
+        -- Get thing we want from @thingwewant:othergarbage.com
+        local i, j = string.find(user_id, '%b@:')
+        nick = string.sub(user_id, i+1, j-1)
+    else
+        nick = self.users[user_id]
+    end
+
     if not nick then
         return user_id
     end
@@ -3326,6 +3334,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         encrypted_message_color = {'lightgreen', 'Print encrypted mesages with this color'},
         --olm_secret = {'', 'Password used to secure olm stores'},
         timeout = {'5', 'Time in seconds until a connection is assumed to be timed out'},
+        nick_style = {'nick', 'Show nicknames or user IDs in chat (\'nick\' or \'uid\')'},
     }
     -- set default settings
     for option, value in pairs(settings) do
