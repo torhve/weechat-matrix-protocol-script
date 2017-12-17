@@ -1954,6 +1954,7 @@ function Room:addNick(user_id, displayname)
     if not displayname
         or displayname == json.null
         or displayname == ''
+        or w.config_get_plugin('nick_style') == 'uid'
         or displayname:match'^%s+$' then
         displayname = user_id:match('@(.*):.+')
     end
@@ -2180,15 +2181,7 @@ end
 function Room:formatNick(user_id)
     -- Turns a nick name into a weechat-styled nickname. This means giving
     -- it colors, and proper prefix and suffix
-    local nick
-    if w.config_get_plugin('nick_style') == 'uid' then
-        -- Get thing we want from @thingwewant:othergarbage.com
-        local i, j = string.find(user_id, '%b@:')
-        nick = string.sub(user_id, i+1, j-1)
-    else
-        nick = self.users[user_id]
-    end
-
+    local nick = self.users[user_id]
     if not nick then
         return user_id
     end
