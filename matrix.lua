@@ -413,12 +413,16 @@ function matrix_away_command_run_cb(data, buffer, args)
 end
 
 function configuration_changed_cb(data, option, value)
-    if value == 'on' then
-        DEBUG = true
-        w.print('', SCRIPT_NAME..': debugging messages enabled')
-    else
-        DEBUG = false
-        w.print('', SCRIPT_NAME..': debugging messages disabled')
+    if option == 'plugins.var.lua.matrix.timeout' then
+        timeout = tonumber(value)*1000
+    elseif option == 'plugins.var.lua.matrix.debug' then 
+        if value == 'on' then
+            DEBUG = true
+            w.print('', SCRIPT_NAME..': debugging messages enabled')
+        else
+            DEBUG = false
+            w.print('', SCRIPT_NAME..': debugging messages disabled')
+        end
     end
 end
 
@@ -3369,6 +3373,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     end
 
     w.hook_config('plugins.var.lua.matrix.debug', 'configuration_changed_cb', '')
+    w.hook_config('plugins.var.lua.matrix.timeout', 'configuration_changed_cb', '')
 
     local cmds = {'help', 'connect', 'debug', 'msg'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
