@@ -505,6 +505,10 @@ function real_http_cb(extra, command, rc, stdout, stderr)
             perr(('Invalid http request: %s'):format(stdout))
             return w.WEECHAT_RC_OK
         end
+        if status_code == 504 and command:find'/sync' then -- keep hammering to try to get in as the server will keep slowly generating the response
+            SERVER:initial_sync()
+            return w.WEECHAT_RC_OK
+        end
         if status_code >= 500 then
             perr(('HTTP API returned error. Code: %s, reason: %s'):format(status_code, reason_phrase))
             return w.WEECHAT_RC_OK
@@ -1750,7 +1754,7 @@ function Room:SetName(name)
         end
     elseif self.aliases then
         local alias = self.aliases[1]
-        if name then
+        if name and alias then
             local _
             name, _ = alias:match('(.+):(.+)')
         end
