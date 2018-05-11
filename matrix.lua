@@ -2534,20 +2534,24 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             if prev_content
                     and prev_content.membership == 'join'
                     and chunktype == 'messages' then
+                local nick = chunk.content.displayname or sender
+                if not nick or nick == json.null or nick == '' then
+                    nick = sender
+                end
                 local oldnick = prev_content.displayname
                 if not oldnick or oldnick == json.null then
                     oldnick = sender
-                else
-                    if oldnick == name then
-                        -- Maybe they changed their avatar or something else
-                        -- that we don't care about (or multiple joins)
-                        return
-                    end
-                    if not backlog then
-                        self:delNick(sender)
-                        self:addNick(sender, chunk.content.displayname)
-                    end
                 end
+
+                if oldnick == nick then
+                    -- Maybe they changed their avatar or something else
+                    -- that we don't care about (or multiple joins)
+                    return
+                end
+
+                self:delNick(sender)
+                self:addNick(sender, nick)
+
                 local pcolor = wcolor'weechat.color.chat_prefix_network'
                 tag'irc_nick'
                 local data = ('%s--\t%s%s%s is now known as %s%s'):format(
@@ -2556,7 +2560,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
                     oldnick,
                     default_color,
                     w.info_get('irc_nick_color', name),
-                    name)
+                    nick)
                 w.print_date_tags(self.buffer, time_int, tags(), data)
             elseif chunktype == 'messages' then
                 tag"irc_smart_filter"
