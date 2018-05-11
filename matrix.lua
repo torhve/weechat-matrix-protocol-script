@@ -73,6 +73,8 @@ local POLL_INTERVAL = 55
 -- Floating values like 0.4 should work too.
 local timeout = 5*1000 -- overriden by w.config_get_plugin later
 
+local current_buffer
+
 local default_color = w.color('default')
 -- Cache error variables so we don't have to look them up for every error
 -- message, a normal user will not change these ever anyway.
@@ -413,12 +415,16 @@ function matrix_away_command_run_cb(data, buffer, args)
 end
 
 function configuration_changed_cb(data, option, value)
-    if value == 'on' then
-        DEBUG = true
-        w.print('', SCRIPT_NAME..': debugging messages enabled')
-    else
-        DEBUG = false
-        w.print('', SCRIPT_NAME..': debugging messages disabled')
+    if option == 'plugins.var.lua.matrix.timeout' then
+        timeout = tonumber(value)*1000
+    elseif option == 'plugins.var.lua.matrix.debug' then 
+        if value == 'on' then
+            DEBUG = true
+            w.print('', SCRIPT_NAME..': debugging messages enabled')
+        else
+            DEBUG = false
+            w.print('', SCRIPT_NAME..': debugging messages disabled')
+        end
     end
 end
 
@@ -503,6 +509,10 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         local httpversion, status_code, reason_phrase = parse_http_statusline(stdout)
         if not httpversion then
             perr(('Invalid http request: %s'):format(stdout))
+            return w.WEECHAT_RC_OK
+        end
+        if status_code == 504 and command:find'/sync' then -- keep hammering to try to get in as the server will keep slowly generating the response
+            SERVER:initial_sync()
             return w.WEECHAT_RC_OK
         end
         if status_code >= 500 then
@@ -1312,7 +1322,11 @@ function MatrixServer:SendReadMarker(room_id, event_id)
         postfields = {}
     }
     data.postfields['m.fully_read'] = event_id
-    data.postfields['m.read'] = event_id
+
+    if w.config_get_plugin('read_receipts') == 'on' then
+        data.postfields['m.read'] = event_id
+    end
+
     data.postfields = json.encode(data.postfields)
     http(url,
       data,
@@ -1750,7 +1764,7 @@ function Room:SetName(name)
         end
     elseif self.aliases then
         local alias = self.aliases[1]
-        if name then
+        if name and alias then
             local _
             name, _ = alias:match('(.+):(.+)')
         end
@@ -1769,6 +1783,10 @@ function Room:SetName(name)
     if not name or name == '' or name == json.null then
         return
     end
+    -- Replace spaces with _, since weechat has poor support for names with
+    -- spaces.
+    -- (see weechat/weechat#937 https://github.com/weechat/weechat/issues/937)
+    name = name:gsub(" ", "_")
 
     -- Check for dupe
     local buffer_name = w.buffer_get_string(self.buffer, 'name')
@@ -2696,7 +2714,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
     -- luacheck: ignore 542
     elseif chunk['type'] == 'm.receipt' then
         -- TODO: figure out if we can do something sensible with read receipts
-    elseif chunk['type'] == 'm.fully_read' and self.buffer ~= w.current_buffer() then
+    elseif chunk['type'] == 'm.fully_read' and self.buffer ~= current_buffer then
         -- we don't want to update read line for the current buffer
         -- TODO: check if read marker correspond to the last event in the room
         w.buffer_set(self.buffer, "unread", "")
@@ -3288,10 +3306,17 @@ function typing_notification_cb(signal, sig_type, data)
     return w.WEECHAT_RC_OK
 end
 
-function buffer_switch_cb(signal, sig_type, data)
+function buffer_switch_cb(data, signal, sig_type)
     -- Update bar item
     w.bar_item_update('matrix_typing_notice')
-    local current_buffer = w.current_buffer()
+    if current_buffer then
+        local room = SERVER:findRoom(current_buffer)
+        if room then
+            room:MarkAsRead()
+        end
+    end
+
+    current_buffer = w.current_buffer()
     local room = SERVER:findRoom(current_buffer)
     if room then
         room:MarkAsRead()
@@ -3300,7 +3325,6 @@ function buffer_switch_cb(signal, sig_type, data)
 end
 
 function typing_bar_item_cb(data, buffer, args)
-    local current_buffer = w.current_buffer()
     local room = SERVER:findRoom(current_buffer)
     if not room then return '' end
     local typing_ids = table.concat(room.typing_ids, ' ')
@@ -3328,6 +3352,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         --olm_secret = {'', 'Password used to secure olm stores'},
         timeout = {'5', 'Time in seconds until a connection is assumed to be timed out'},
         nick_style = {'nick', 'Show nicknames or user IDs in chat (\'nick\' or \'uid\')'},
+        read_receipts = {'on', 'Send read receipts. Note that not sending them will prevent a room to be marked as read in Riot clients.'}
     }
     -- set default settings
     for option, value in pairs(settings) do
@@ -3362,6 +3387,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
     end
 
     w.hook_config('plugins.var.lua.matrix.debug', 'configuration_changed_cb', '')
+    w.hook_config('plugins.var.lua.matrix.timeout', 'configuration_changed_cb', '')
 
     local cmds = {'help', 'connect', 'debug', 'msg'}
     w.hook_command(SCRIPT_COMMAND, 'Plugin for matrix.org chat protocol',
