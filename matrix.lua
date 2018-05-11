@@ -73,6 +73,8 @@ local POLL_INTERVAL = 55
 -- Floating values like 0.4 should work too.
 local timeout = 5*1000 -- overriden by w.config_get_plugin later
 
+local current_buffer
+
 local default_color = w.color('default')
 -- Cache error variables so we don't have to look them up for every error
 -- message, a normal user will not change these ever anyway.
@@ -2711,7 +2713,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
     -- luacheck: ignore 542
     elseif chunk['type'] == 'm.receipt' then
         -- TODO: figure out if we can do something sensible with read receipts
-    elseif chunk['type'] == 'm.fully_read' and self.buffer ~= w.current_buffer() then
+    elseif chunk['type'] == 'm.fully_read' and self.buffer ~= current_buffer then
         -- we don't want to update read line for the current buffer
         -- TODO: check if read marker correspond to the last event in the room
         w.buffer_set(self.buffer, "unread", "")
@@ -3303,10 +3305,17 @@ function typing_notification_cb(signal, sig_type, data)
     return w.WEECHAT_RC_OK
 end
 
-function buffer_switch_cb(signal, sig_type, data)
+function buffer_switch_cb(data, signal, sig_type)
     -- Update bar item
     w.bar_item_update('matrix_typing_notice')
-    local current_buffer = w.current_buffer()
+    if current_buffer then
+        local room = SERVER:findRoom(current_buffer)
+        if room then
+            room:MarkAsRead()
+        end
+    end
+
+    current_buffer = w.current_buffer()
     local room = SERVER:findRoom(current_buffer)
     if room then
         room:MarkAsRead()
@@ -3315,7 +3324,6 @@ function buffer_switch_cb(signal, sig_type, data)
 end
 
 function typing_bar_item_cb(data, buffer, args)
-    local current_buffer = w.current_buffer()
     local room = SERVER:findRoom(current_buffer)
     if not room then return '' end
     local typing_ids = table.concat(room.typing_ids, ' ')
