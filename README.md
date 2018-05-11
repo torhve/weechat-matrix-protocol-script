@@ -35,7 +35,7 @@ weechat
 Helpful commands after starting WeeChat
 ```
 # If you didn't put matrix.lua in autoload
-/lua load matrix.lua
+/script load matrix.lua
 # Set the two required settings. Look in WeeChat docs for secdata if you don't want to store passord in the clear. ( http://dev.weechat.org/post/2013/08/04/Secured-data )
 /set plugins.var.lua.matrix.user username
 /set plugins.var.lua.matrix.password secret
@@ -63,7 +63,7 @@ If at any point you get any errors you can always try reloading the script to
 refresh the state by issuing the command
 
 ```
-/lua reload matrix
+/script reload matrix
 ```
 
 If you get invited to a room, the script will autojoin, which is configurable
@@ -93,7 +93,7 @@ git pull
 ```
 
 ```
-/lua reload matrix
+/script reload matrix
 ```
 
 ## How to get WeeChat & Lua deps up and running on Debian/Ubuntu:
