@@ -251,8 +251,8 @@ local function irc_formatting_to_html(s)
         'orange','yellow','lightgreen','teal','cyan', 'lightblue',
         'fuchsia', 'gray', 'lightgray'}
 
-    s = byte_to_tag(s, '\02', '<em>', '</em>')
-    s = byte_to_tag(s, '\029', '<i>', '</i>')
+    s = byte_to_tag(s, '\02', '<strong>', '</strong>')
+    s = byte_to_tag(s, '\029', '<em>', '</em>')
     s = byte_to_tag(s, '\031', '<u>', '</u>')
     -- First do full color strings with reset.
     -- Iterate backwards to catch long colors before short
