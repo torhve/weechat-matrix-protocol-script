@@ -1110,6 +1110,7 @@ MatrixServer.create = function()
      server.rooms = {}
      -- Store user presences here since they are not local to the rooms
      server.presence = {}
+     server.avatars = {}
      server.end_token = 'END'
      server.typing_time = os.time()
      if w.config_get_plugin('presence_filter') ~= 'on' then
@@ -2527,6 +2528,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
             if not name or name == json.null or name == '' then
                 name = sender
             end
+            SERVER.avatars[name] = chunk.content.avatar_url
             -- Check if the chunk has prev_content or not
             -- if there is prev_content there wasn't a join but a nick change
             -- or duplicate join
@@ -2818,6 +2820,20 @@ function Room:Whois(nick)
                 pcolor,
                 SERVER.presence[id] or 'offline')
             w.print_date_tags(self.buffer, nil, 'notify_message', pdata)
+
+            local avatar_url = SERVER.avatars[nick]
+            if avatar_url ~= nil then
+                avatar_url = avatar_url:gsub('mxc://',
+                    w.config_get_plugin('homeserver_url')
+                    .. '_matrix/media/v1/download/')
+                local pdata = ('%s--\t%s%s%s has avatar %s'):format(
+                    pcolor,
+                    w.info_get('irc_nick_color', nick),
+                    nick,
+                    default_color,
+                    avatar_url)
+                w.print_date_tags(self.buffer, nil, 'notify_message', pdata)
+            end
             -- TODO support printing status_msg field in presence data here
             break
         end
