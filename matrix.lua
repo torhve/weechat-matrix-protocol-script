@@ -1613,7 +1613,7 @@ function MatrixServer:Upload(room_id, filename)
     local url = w.config_get_plugin('homeserver_url') ..
         ('_matrix/media/r0/upload?access_token=%s')
         :format( urllib.quote(SERVER.access_token) )
-    w.hook_process_hashtable('/usr/bin/curl', {
+    w.hook_process_hashtable('curl', {
         arg1 = '--data-binary', -- no encoding of data
         arg2 = '@'..filename, -- @means curl will load the filename
         arg3 = '-XPOST', -- HTTP POST method
