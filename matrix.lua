@@ -1972,6 +1972,7 @@ function Room:addNick(user_id, displayname)
     if not displayname
         or displayname == json.null
         or displayname == ''
+        or w.config_get_plugin('nick_style') == 'uid'
         or displayname:match'^%s+$' then
         displayname = user_id:match('@(.*):.+')
     end
@@ -3350,6 +3351,7 @@ if w.register(SCRIPT_NAME, SCRIPT_AUTHOR, SCRIPT_VERSION, SCRIPT_LICENSE, SCRIPT
         encrypted_message_color = {'lightgreen', 'Print encrypted mesages with this color'},
         --olm_secret = {'', 'Password used to secure olm stores'},
         timeout = {'5', 'Time in seconds until a connection is assumed to be timed out'},
+        nick_style = {'nick', 'Show nicknames or user IDs in chat (\'nick\' or \'uid\')'},
         read_receipts = {'on', 'Send read receipts. Note that not sending them will prevent a room to be marked as read in Riot clients.'}
     }
     -- set default settings
