@@ -1781,6 +1781,7 @@ function Room:SetName(name)
     if not name or name == '' or name == json.null then
         return
     end
+    name = name:gsub(" ", "_")
 
     -- Check for dupe
     local buffer_name = w.buffer_get_string(self.buffer, 'name')
