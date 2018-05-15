@@ -1786,10 +1786,11 @@ function Room:SetName(name)
     if not name or name == '' or name == json.null then
         return
     end
+
     -- Replace spaces with _, since weechat has poor support for names with
     -- spaces.
     -- (see weechat/weechat#937 https://github.com/weechat/weechat/issues/937)
-    name = name:gsub(" ", "_")
+    -- name = name:gsub(" ", "_")
 
     -- Check for dupe
     local buffer_name = w.buffer_get_string(self.buffer, 'name')
