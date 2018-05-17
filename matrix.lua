@@ -2829,13 +2829,13 @@ function Room:Whois(nick)
                 avatar_url = avatar_url:gsub('mxc://',
                     w.config_get_plugin('homeserver_url')
                     .. '_matrix/media/v1/download/')
-                local pdata = ('%s--\t%s%s%s has avatar %s'):format(
+                local avatar_line = ('%s--\t%s%s%s has avatar %s'):format(
                     pcolor,
                     w.info_get('irc_nick_color', nick),
                     nick,
                     default_color,
                     avatar_url)
-                w.print_date_tags(self.buffer, nil, 'notify_message', pdata)
+                w.print_date_tags(self.buffer, nil, 'notify_message', avatar_line)
             end
             -- TODO support printing status_msg field in presence data here
             break
