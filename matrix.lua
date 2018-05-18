@@ -419,7 +419,7 @@ end
 function configuration_changed_cb(data, option, value)
     if option == 'plugins.var.lua.matrix.timeout' then
         timeout = tonumber(value)*1000
-    elseif option == 'plugins.var.lua.matrix.debug' then 
+    elseif option == 'plugins.var.lua.matrix.debug' then
         if value == 'on' then
             DEBUG = true
             w.print('', SCRIPT_NAME..': debugging messages enabled')
@@ -2167,6 +2167,7 @@ function Room:delNick(id)
 end
 
 function Room:UpdateLine(id, message)
+    if not id then return end
     local lines = w.hdata_pointer(w.hdata_get('buffer'), self.buffer, 'own_lines')
     if lines == '' then return end
     local line = w.hdata_pointer(w.hdata_get('lines'), lines, 'last_line')
@@ -2716,7 +2717,7 @@ function Room:ParseChunk(chunk, backlog, chunktype)
         local result = self:UpdateLine(redact_id, w.color'darkgray'..'(redacted)')
         if not result and not backlog then
             -- backlog doesn't send original message
-            perr 'Could not find message to redact :('
+            perr(('Could not find message to redact :(. Redaction ID is: %s'):format(redact_id))
         end
     elseif chunk['type'] == 'm.room.history_visibility' then
         self.history_visibility = chunk.content.history_visibility
