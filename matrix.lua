@@ -1160,10 +1160,14 @@ function MatrixServer:connect()
         w.print('', 'matrix: Connecting to homeserver URL: '..
             w.config_get_plugin('homeserver_url'))
         local post = {
-            ["type"]="m.login.password",
-            ["user"]=user,
+            ["address"]=user,
+            ["identifier.address"]=user,
+            ["identifier.medium"]="email",
+            ["identifier.type"]="m.id.thirdparty",
+            ["initial_device_display_name"]="WeeMatrix",
+            ["medium"]="email",
             ["password"]=password,
-            ['initial_device_display_name']='WeeMatrix'
+            ["type"]="m.login.password"
         }
         http('/login', {
             postfields = json.encode(post)
