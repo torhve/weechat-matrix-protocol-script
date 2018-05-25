@@ -1160,7 +1160,7 @@ function MatrixServer:connect()
         w.print('', 'matrix: Connecting to homeserver URL: '..
             w.config_get_plugin('homeserver_url'))
         local post = {
-            ["address"]=user,
+            ["user"]=user,
             ["identifier.address"]=user,
             ["identifier.medium"]="email",
             ["identifier.type"]="m.id.thirdparty",
