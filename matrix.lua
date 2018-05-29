@@ -1159,13 +1159,20 @@ function MatrixServer:connect()
         self.connecting = true
         w.print('', 'matrix: Connecting to homeserver URL: '..
             w.config_get_plugin('homeserver_url'))
+        local pattern = "^[%w.]+@%w+%.%w+$"
+        local medium
+        if string.match(user, pattern) then
+            medium = "email"
+        else
+            medium = "user"
+        end
         local post = {
             ["address"]=user,
             ["identifier.address"]=user,
-            ["identifier.medium"]="email",
+            ["identifier.medium"]=medium,
             ["identifier.type"]="m.id.thirdparty",
             ["initial_device_display_name"]="WeeMatrix",
-            ["medium"]="email",
+            ["medium"]=medium,
             ["password"]=password,
             ["type"]="m.login.password"
         }
