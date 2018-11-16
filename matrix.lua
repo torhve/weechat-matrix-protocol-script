@@ -471,7 +471,7 @@ local function http(url, post, cb, h_timeout, extra, api_ns)
 end
 
 local function parse_http_statusline(line)
-    local httpversion, status_code, reason_phrase = line:match("^HTTP/(1%.[01]) (%d%d%d) (.-)\r?\n")
+    local httpversion, status_code, reason_phrase = line:match("^HTTP/([012]) (%d%d%d) (.-)\r?\n")
     if not httpversion then
         return
     end
