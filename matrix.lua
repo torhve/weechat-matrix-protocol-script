@@ -529,7 +529,9 @@ function real_http_cb(extra, command, rc, stdout, stderr)
         -- Skip to data
         stdout = (stdout:match('.-\r?\n\r?\n(.*)'))
         -- Protected call in case of JSON errors
-        local success, js = pcall(json.decode, stdout)
+        -- Ensure that locale is detected correctly (fixes bug #49)
+        local localejson = json.new()
+        local success, js = pcall(localejson.decode, stdout)
         if not success then
             mprint(('error\t%s during json load: %s'):format(js, stdout))
             return w.WEECHAT_RC_OK
