@@ -106,6 +106,14 @@ Note that the weechat in jessie (1.0.1) is quite old compared to upstream and is
 missing many bugfixes. This plugin may not work with older versions. There are
 unofficial packages [here](https://weechat.org/download/debian/).
 
+## How to get WeeChat & Lua deps up and running on CentOS/RHEL:
+
+```bash
+sudo yum install epel-release
+sudo yum install weechat lua lua-devel luarocks
+sudo luarocks install lua-cjson
+```
+
 ## How to get WeeChat & Lua deps up and running on OSX:
 
 ### using brew (recommended; it's a simpler faster install and ships newer weechat than MacPorts):
