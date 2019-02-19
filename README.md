@@ -27,8 +27,8 @@ Matrix is a new open source realtime federated chat protocol. You can read more 
 git clone https://github.com/torhve/weechat-matrix-protocol-script.git
 # Copy the script into WeeChat's Lua dir
 cp weechat-matrix-protocol-script/matrix.lua ~/.weechat/lua/
-# Make a symlink into the autoload dir to load script automatically when WeeChat starts
-ln -s ~/.weechat/lua/matrix.lua ~/.weechat/lua/autoload
+# Make a symlink into the autoload dir to load the script automatically when WeeChat starts
+ln -s ~/.weechat/lua/matrix.lua ~/.weechat/lua/autoload/
 # Start WeeChat
 weechat
 ```
