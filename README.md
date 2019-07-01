@@ -2,6 +2,10 @@
 
 Also known as WeeMatrix, this script is considered beta quality as not all functionality is in place and still has known bugs, and unknown bugs to be discovered and fixed.
 
+## Project Status and Alternative Client
+
+While this script generally works for general usage, there's a new script that's more actively developed here: https://github.com/poljar/weechat-matrix
+
 ## What is Matrix ?
 
 Matrix is a new open source realtime federated chat protocol. You can read more about it on [their website](http://matrix.org/blog/faq/).
